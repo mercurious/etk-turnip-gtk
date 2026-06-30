@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mercurious <dutch.money@gmail.com>
+Date: Tue, 30 Jun 2026 11:42:18 -0400
+Subject: [PATCH 1/4] ETK GTK gears: LSD/sddepth depth-cache barriers + dimlog
+ (squashed import over mesa-26.1.3; see PATCHES.md)
+
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 30 +++++++++++++++++++++++++++
+ src/freedreno/vulkan/tu_util.cc       | 21 +++++++++++++++++++
+ src/freedreno/vulkan/tu_util.h        | 13 ++++++++++++
+ 3 files changed, 64 insertions(+)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 8fc2be5..9faa309 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -302,6 +302,9 @@ tu_emit_rt_workaround(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+    tu_cs_emit(cs, A6XX_CP_SET_MARKER_0_RT_WA_END);
+ }
+ 
++/* Patch #2 (sdgate): defined far below; needed at the flush graft. */
++static bool tu6_writes_depth(struct tu_cmd_buffer *cmd, bool depth_test_enable);
++
+ template <chip CHIP>
+ static void
+ tu6_emit_flushes(struct tu_cmd_buffer *cmd_buffer,
+@@ -318,6 +321,33 @@ tu6_emit_flushes(struct tu_cmd_buffer *cmd_buffer,
+       flushes |= TU_CMD_FLAG_WAIT_MEM_WRITES |
+                  TU_CMD_FLAG_WAIT_FOR_IDLE |
+                  TU_CMD_FLAG_WAIT_FOR_ME;
++   /* ETK LSD gears — lighter rungs below the syncdraw sledgehammer.
++    * Mutually exclusive (heaviest set flag wins); purely additive sync.
++    * sddepth: targeted depth-CCU flush + CP ordering (no full GPU idle). */
++   else if (TU_DEBUG(SDDEPTH))
++      flushes |= TU_CMD_FLAG_WAIT_MEM_WRITES |
++                 TU_CMD_FLAG_CCU_CLEAN_DEPTH |
++                 TU_CMD_FLAG_WAIT_FOR_ME;
++   else if (TU_DEBUG(SDMEM))
++      flushes |= TU_CMD_FLAG_WAIT_MEM_WRITES |
++                 TU_CMD_FLAG_WAIT_FOR_ME;
++   else if (TU_DEBUG(SDME))
++      flushes |= TU_CMD_FLAG_WAIT_FOR_ME;
++   /* Patch #2 - sdclean: the CCU depth-clean ALONE (drop sddepth's mem-write +
++    * WFM waits) - tests whether depth-clean is the sole active ingredient. */
++   else if (TU_DEBUG(SDCLEAN))
++      flushes |= TU_CMD_FLAG_CCU_CLEAN_DEPTH;
++   /* Patch #2 - sdgate (the scalpel): sddepth's barrier, but ONLY on draws that
++    * write depth in the renderpass (the depth-resolve hazard class), not blindly
++    * every draw - recovers the per-draw tax on the color/non-depth majority. */
++   else if (TU_DEBUG(SDGATE)) {
++      if (cache == &cmd_buffer->state.renderpass_cache &&
++          tu6_writes_depth(cmd_buffer,
++                           cmd_buffer->vk.dynamic_graphics_state.ds.depth.test_enable))
++         flushes |= TU_CMD_FLAG_WAIT_MEM_WRITES |
++                    TU_CMD_FLAG_CCU_CLEAN_DEPTH |
++                    TU_CMD_FLAG_WAIT_FOR_ME;
++   }
+ 
+    /* Experiments show that invalidating CCU while it still has data in it
+     * doesn't work, so make sure to always flush before invalidating in case
+diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
+index f0c19c3..506fced 100644
+--- a/src/freedreno/vulkan/tu_util.cc
++++ b/src/freedreno/vulkan/tu_util.cc
+@@ -34,6 +34,12 @@ static const struct debug_control tu_debug_options[] = {
+    { "perfc", TU_DEBUG_PERFC },
+    { "flushall", TU_DEBUG_FLUSHALL },
+    { "syncdraw", TU_DEBUG_SYNCDRAW },
++   { "sddepth", TU_DEBUG_SDDEPTH },
++   { "sdmem", TU_DEBUG_SDMEM },
++   { "sdme", TU_DEBUG_SDME },
++   { "sdclean", TU_DEBUG_SDCLEAN },
++   { "sdgate", TU_DEBUG_SDGATE },
++   { "dimlog", TU_DEBUG_DIMLOG },
+    { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
+    { "rast_order", TU_DEBUG_RAST_ORDER },
+    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
+@@ -69,6 +75,8 @@ const uint64_t tu_runtime_debug_flags =
+    TU_DEBUG_NIR | TU_DEBUG_NOBIN | TU_DEBUG_SYSMEM | TU_DEBUG_GMEM |
+    TU_DEBUG_FORCEBIN | TU_DEBUG_LAYOUT | TU_DEBUG_NOLRZ | TU_DEBUG_NOLRZFC |
+    TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
++   TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME |
++   TU_DEBUG_SDCLEAN | TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG |
+    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
+    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |
+    TU_DEBUG_NO_CONCURRENT_RESOLVES | TU_DEBUG_NO_CONCURRENT_UNRESOLVES |
+@@ -352,6 +360,19 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
+          tiling->vsc.tile_count.height = 2;
+       }
+    }
++
++   /* ETK dimlog (Stage IV §5): one line per framebuffer/gmem-layout tiling
++    * setup. rem=0 means the render target tiles cleanly; a nonzero remainder is
++    * a ragged final bin. LRZ/UBWC alignment is derived offline from fb=. */
++   if (TU_DEBUG(DIMLOG) && tiling->possible) {
++      mesa_logi("[ETK dimlog] gmem_layout=%u fb=%ux%u tile0=%ux%u bins=%ux%u "
++                "rem=%ux%u tile_align=%ux%u",
++                gmem_layout, fb->width, fb->height,
++                tiling->tile0.width, tiling->tile0.height,
++                tiling->vsc.tile_count.width, tiling->vsc.tile_count.height,
++                fb->width % tiling->tile0.width, fb->height % tiling->tile0.height,
++                tile_align_w, tile_align_h);
++   }
+ }
+ 
+ static bool
+diff --git a/src/freedreno/vulkan/tu_util.h b/src/freedreno/vulkan/tu_util.h
+index cfa18f3..011293a 100644
+--- a/src/freedreno/vulkan/tu_util.h
++++ b/src/freedreno/vulkan/tu_util.h
+@@ -48,6 +48,19 @@ enum tu_debug_flags : uint64_t
+    TU_DEBUG_PERFC                    = BITFIELD64_BIT(8),
+    TU_DEBUG_FLUSHALL                 = BITFIELD64_BIT(9),
+    TU_DEBUG_SYNCDRAW                 = BITFIELD64_BIT(10),
++   /* ETK LSD gears (FPS-recovery transmission) — lighter per-draw barriers
++    * than syncdraw; gate in tu6_emit_flushes. */
++   TU_DEBUG_SDDEPTH                  = BITFIELD64_BIT(37),
++   TU_DEBUG_SDMEM                   = BITFIELD64_BIT(38),
++   TU_DEBUG_SDME                    = BITFIELD64_BIT(39),
++   /* Patch #2: sdclean = depth-clean only (no waits); sdgate = depth-clean
++    * gated to depth-writing draws (the hazard class). */
++   TU_DEBUG_SDCLEAN                 = BITFIELD64_BIT(40),
++   TU_DEBUG_SDGATE                  = BITFIELD64_BIT(41),
++   /* ETK resolution-alignment investigation (Stage IV §5): dimlog instruments
++    * the GMEM render-target/bin dims + ragged remainder at tiling setup. Inert
++    * unless TU_DEBUG=dimlog. rtalign (the fix) reserves the next bit. */
++   TU_DEBUG_DIMLOG                  = BITFIELD64_BIT(42),
+    TU_DEBUG_PUSH_CONSTS_PER_STAGE    = BITFIELD64_BIT(11),
+    TU_DEBUG_GMEM                     = BITFIELD64_BIT(12),
+    TU_DEBUG_RAST_ORDER               = BITFIELD64_BIT(13),
+-- 
+2.50.1 (Apple Git-155)
+

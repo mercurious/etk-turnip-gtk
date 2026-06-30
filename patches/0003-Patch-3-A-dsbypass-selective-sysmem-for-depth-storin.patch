@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ETK Fork <etk@local>
+Date: Wed, 24 Jun 2026 15:05:33 +0000
+Subject: [PATCH 3/4] =?UTF-8?q?Patch=20#3=20A:=20dsbypass=20=E2=80=94=20se?=
+ =?UTF-8?q?lective=20sysmem=20for=20depth-storing=20renderpasses=20(bypass?=
+ =?UTF-8?q?=20the=20GMEM=20depth=20resolve).=20A6XX,=20TU=5FDEBUG-gated,?=
+ =?UTF-8?q?=20default-off.=20The=20last=20cure-candidate.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 17 +++++++++++++++++
+ src/freedreno/vulkan/tu_util.cc       |  3 ++-
+ src/freedreno/vulkan/tu_util.h        |  4 ++++
+ 3 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 2e02f6a..7ded4ed 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -1359,6 +1359,23 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
+       return true;
+    }
+ 
++   /* ETK Patch #3 "A" (dsbypass): selectively route only depth-STORING
++    * renderpasses to sysmem, to bypass the GMEM->sysmem depth resolve that
++    * wedges the HSL boss. Distinct from global SYSMEM: color-only passes stay
++    * on GMEM. Tests whether avoiding the GMEM depth resolve dodges the wedge,
++    * or whether the sysmem depth store-out hits the same CCU-resolve hazard. */
++   if (TU_DEBUG(DSBYPASS) && cmd->state.pass) {
++      for (uint32_t i = 0; i < cmd->state.pass->attachment_count; i++) {
++         const struct tu_render_pass_attachment *att =
++            &cmd->state.pass->attachments[i];
++         if (att->store && vk_format_has_depth(att->format)) {
++            cmd->state.rp.gmem_disable_reason =
++               "ETK dsbypass: depth-store pass -> sysmem";
++            return true;
++         }
++      }
++   }
++
+    /* can't fit attachments into gmem */
+    if (!cmd->state.tiling->possible) {
+       cmd->state.rp.gmem_disable_reason = "Can't fit attachments into gmem";
+diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
+index abe5d61..6084bcc 100644
+--- a/src/freedreno/vulkan/tu_util.cc
++++ b/src/freedreno/vulkan/tu_util.cc
+@@ -42,6 +42,7 @@ static const struct debug_control tu_debug_options[] = {
+    { "dimlog", TU_DEBUG_DIMLOG },
+    { "ccuhalf", TU_DEBUG_CCUHALF },
+    { "ccuquarter", TU_DEBUG_CCUQUARTER },
++   { "dsbypass", TU_DEBUG_DSBYPASS },
+    { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
+    { "rast_order", TU_DEBUG_RAST_ORDER },
+    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
+@@ -79,7 +80,7 @@ const uint64_t tu_runtime_debug_flags =
+    TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
+    TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME |
+    TU_DEBUG_SDCLEAN | TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG |
+-   TU_DEBUG_CCUHALF | TU_DEBUG_CCUQUARTER |
++   TU_DEBUG_CCUHALF | TU_DEBUG_CCUQUARTER | TU_DEBUG_DSBYPASS |
+    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
+    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |
+    TU_DEBUG_NO_CONCURRENT_RESOLVES | TU_DEBUG_NO_CONCURRENT_UNRESOLVES |
+diff --git a/src/freedreno/vulkan/tu_util.h b/src/freedreno/vulkan/tu_util.h
+index 386f4e1..62f6111 100644
+--- a/src/freedreno/vulkan/tu_util.h
++++ b/src/freedreno/vulkan/tu_util.h
+@@ -66,6 +66,10 @@ enum tu_debug_flags : uint64_t
+     * the HSL boss depth-resolve wedges under. A6XX-only; emit_rb_ccu_cntl. */
+    TU_DEBUG_CCUHALF                 = BITFIELD64_BIT(43),
+    TU_DEBUG_CCUQUARTER              = BITFIELD64_BIT(44),
++   /* ETK Patch #3 "A" (dsbypass): route depth-STORING renderpasses to sysmem,
++    * bypassing the GMEM->sysmem depth resolve that wedges the boss. Selective
++    * (only depth-store passes), unlike global TU_DEBUG(SYSMEM). */
++   TU_DEBUG_DSBYPASS                = BITFIELD64_BIT(45),
+    TU_DEBUG_PUSH_CONSTS_PER_STAGE    = BITFIELD64_BIT(11),
+    TU_DEBUG_GMEM                     = BITFIELD64_BIT(12),
+    TU_DEBUG_RAST_ORDER               = BITFIELD64_BIT(13),
+-- 
+2.50.1 (Apple Git-155)
+

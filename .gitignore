@@ -1,0 +1,15 @@
+# Upstream checkout produced by scripts/prepare-fork-branch.sh — not committed here.
+mesa-fork-*/
+mesa/
+
+# Meson/ninja build trees
+build-rocknix/
+build*/
+
+# Built drivers and large binaries belong on release assets, not in git history.
+*.so
+*.rd
+
+# Editor / OS noise
+.DS_Store
+*.swp

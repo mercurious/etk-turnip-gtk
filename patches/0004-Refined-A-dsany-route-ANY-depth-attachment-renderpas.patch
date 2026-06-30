@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ETK Fork <etk@local>
+Date: Wed, 24 Jun 2026 15:56:16 +0000
+Subject: [PATCH 4/4] =?UTF-8?q?Refined=20A:=20dsany=20=E2=80=94=20route=20?=
+ =?UTF-8?q?ANY=20depth-attachment=20renderpass=20to=20sysmem=20(drops=20ds?=
+ =?UTF-8?q?bypass=20store=3Dtrue=20req=20that=20missed=20the=20boss=20alig?=
+ =?UTF-8?q?nment-driven=20resolve).=20Conclusive=20avoid-GMEM-resolve=20te?=
+ =?UTF-8?q?st.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 18 ++++++++++++++++++
+ src/freedreno/vulkan/tu_util.cc       |  3 ++-
+ src/freedreno/vulkan/tu_util.h        |  4 ++++
+ 3 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 7ded4ed..c3f525b 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -1376,6 +1376,24 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
+       }
+    }
+ 
++   /* Refined A (dsany): route ANY renderpass with a depth/stencil attachment to
++    * sysmem, not just store=true ones. The boss's ragged 255x510 depth resolve is
++    * alignment-driven, so it has a depth attachment but no store -> dsbypass missed
++    * it. dsany catches it: if the GMEM 255x510 resolve disappears and it STILL
++    * hangs, the sysmem depth store hits the same hazard (decisive); if it stops
++    * hanging, avoiding the GMEM resolve is the cure. */
++   if (TU_DEBUG(DSANY) && cmd->state.pass) {
++      for (uint32_t i = 0; i < cmd->state.pass->attachment_count; i++) {
++         const struct tu_render_pass_attachment *att =
++            &cmd->state.pass->attachments[i];
++         if (vk_format_has_depth(att->format)) {
++            cmd->state.rp.gmem_disable_reason =
++               "ETK dsany: depth-attachment pass -> sysmem";
++            return true;
++         }
++      }
++   }
++
+    /* can't fit attachments into gmem */
+    if (!cmd->state.tiling->possible) {
+       cmd->state.rp.gmem_disable_reason = "Can't fit attachments into gmem";
+diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
+index 6084bcc..a6999c2 100644
+--- a/src/freedreno/vulkan/tu_util.cc
++++ b/src/freedreno/vulkan/tu_util.cc
+@@ -43,6 +43,7 @@ static const struct debug_control tu_debug_options[] = {
+    { "ccuhalf", TU_DEBUG_CCUHALF },
+    { "ccuquarter", TU_DEBUG_CCUQUARTER },
+    { "dsbypass", TU_DEBUG_DSBYPASS },
++   { "dsany", TU_DEBUG_DSANY },
+    { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
+    { "rast_order", TU_DEBUG_RAST_ORDER },
+    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
+@@ -80,7 +81,7 @@ const uint64_t tu_runtime_debug_flags =
+    TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
+    TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME |
+    TU_DEBUG_SDCLEAN | TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG |
+-   TU_DEBUG_CCUHALF | TU_DEBUG_CCUQUARTER | TU_DEBUG_DSBYPASS |
++   TU_DEBUG_CCUHALF | TU_DEBUG_CCUQUARTER | TU_DEBUG_DSBYPASS | TU_DEBUG_DSANY |
+    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
+    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |
+    TU_DEBUG_NO_CONCURRENT_RESOLVES | TU_DEBUG_NO_CONCURRENT_UNRESOLVES |
+diff --git a/src/freedreno/vulkan/tu_util.h b/src/freedreno/vulkan/tu_util.h
+index 62f6111..a0bc7e7 100644
+--- a/src/freedreno/vulkan/tu_util.h
++++ b/src/freedreno/vulkan/tu_util.h
+@@ -70,6 +70,10 @@ enum tu_debug_flags : uint64_t
+     * bypassing the GMEM->sysmem depth resolve that wedges the boss. Selective
+     * (only depth-store passes), unlike global TU_DEBUG(SYSMEM). */
+    TU_DEBUG_DSBYPASS                = BITFIELD64_BIT(45),
++   /* Refined A: dsany routes ANY depth-attachment renderpass to sysmem (drops
++    * dsbypass's store=true requirement, which missed the boss's alignment-driven
++    * ragged-depth resolve). Catches the boss pass -> conclusive avoid-resolve test. */
++   TU_DEBUG_DSANY                   = BITFIELD64_BIT(46),
+    TU_DEBUG_PUSH_CONSTS_PER_STAGE    = BITFIELD64_BIT(11),
+    TU_DEBUG_GMEM                     = BITFIELD64_BIT(12),
+    TU_DEBUG_RAST_ORDER               = BITFIELD64_BIT(13),
+-- 
+2.50.1 (Apple Git-155)
+

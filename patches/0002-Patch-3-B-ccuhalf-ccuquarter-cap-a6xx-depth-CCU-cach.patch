@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ETK Fork <etk@local>
+Date: Wed, 24 Jun 2026 14:05:10 +0000
+Subject: [PATCH 2/4] =?UTF-8?q?Patch=20#3=20B:=20ccuhalf/ccuquarter=20?=
+ =?UTF-8?q?=E2=80=94=20cap=20a6xx=20depth=20CCU=20cache=20size=20(FULL->HA?=
+ =?UTF-8?q?LF/QUARTER)=20at=20emit=5Frb=5Fccu=5Fcntl=20to=20attack=20the?=
+ =?UTF-8?q?=20DEPTH=5FCACHE=3DFULL=20boss-resolve=20saturation.=20A6XX-onl?=
+ =?UTF-8?q?y,=20TU=5FDEBUG-gated,=20default-off.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 4 +++-
+ src/freedreno/vulkan/tu_util.cc       | 3 +++
+ src/freedreno/vulkan/tu_util.h        | 5 +++++
+ 3 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 9faa309..2e02f6a 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -648,7 +648,9 @@ emit_rb_ccu_cntl(struct tu_cs *cs, struct tu_device *dev, bool gmem)
+             dev->physical_device->info->props.concurrent_resolve,
+          .depth_offset_hi = 0,
+          .color_offset_hi = color_offset_hi,
+-         .depth_cache_size = CCU_CACHE_SIZE_FULL,
++         .depth_cache_size = TU_DEBUG(CCUQUARTER) ? CCU_CACHE_SIZE_QUARTER :
++                             TU_DEBUG(CCUHALF)    ? CCU_CACHE_SIZE_HALF   :
++                                                    CCU_CACHE_SIZE_FULL,
+          .depth_offset = 0,
+          .color_cache_size = color_cache_size,
+          .color_offset = color_offset
+diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
+index 506fced..abe5d61 100644
+--- a/src/freedreno/vulkan/tu_util.cc
++++ b/src/freedreno/vulkan/tu_util.cc
+@@ -40,6 +40,8 @@ static const struct debug_control tu_debug_options[] = {
+    { "sdclean", TU_DEBUG_SDCLEAN },
+    { "sdgate", TU_DEBUG_SDGATE },
+    { "dimlog", TU_DEBUG_DIMLOG },
++   { "ccuhalf", TU_DEBUG_CCUHALF },
++   { "ccuquarter", TU_DEBUG_CCUQUARTER },
+    { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
+    { "rast_order", TU_DEBUG_RAST_ORDER },
+    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
+@@ -77,6 +79,7 @@ const uint64_t tu_runtime_debug_flags =
+    TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
+    TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME |
+    TU_DEBUG_SDCLEAN | TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG |
++   TU_DEBUG_CCUHALF | TU_DEBUG_CCUQUARTER |
+    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
+    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |
+    TU_DEBUG_NO_CONCURRENT_RESOLVES | TU_DEBUG_NO_CONCURRENT_UNRESOLVES |
+diff --git a/src/freedreno/vulkan/tu_util.h b/src/freedreno/vulkan/tu_util.h
+index 011293a..386f4e1 100644
+--- a/src/freedreno/vulkan/tu_util.h
++++ b/src/freedreno/vulkan/tu_util.h
+@@ -61,6 +61,11 @@ enum tu_debug_flags : uint64_t
+     * the GMEM render-target/bin dims + ragged remainder at tiling setup. Inert
+     * unless TU_DEBUG=dimlog. rtalign (the fix) reserves the next bit. */
+    TU_DEBUG_DIMLOG                  = BITFIELD64_BIT(42),
++   /* ETK Patch #3 "B": cap the a6xx depth CCU cache size at the RB_CCU_CNTL
++    * emit (FULL->HALF/QUARTER) — attacks the DEPTH_CACHE_SIZE=FULL saturation
++    * the HSL boss depth-resolve wedges under. A6XX-only; emit_rb_ccu_cntl. */
++   TU_DEBUG_CCUHALF                 = BITFIELD64_BIT(43),
++   TU_DEBUG_CCUQUARTER              = BITFIELD64_BIT(44),
+    TU_DEBUG_PUSH_CONSTS_PER_STAGE    = BITFIELD64_BIT(11),
+    TU_DEBUG_GMEM                     = BITFIELD64_BIT(12),
+    TU_DEBUG_RAST_ORDER               = BITFIELD64_BIT(13),
+-- 
+2.50.1 (Apple Git-155)
+
