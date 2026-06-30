@@ -32,7 +32,7 @@ The fork grafts a set of opt-in **TU_DEBUG gears** at a single emit site
 serialization barriers that reduce GPU-hang frequency on GPU-bound scenes without the cost of a
 full wait-for-idle.
 
-- The load-bearing gear is **`sddepth`** (`WAIT_MEM_WRITES | CCU_CLEAN_DEPTH | WAIT_FOR_ME`).
+- The optimal load-bearing gear is **`syncdraw`** (`WAIT_MEM_WRITES | CCU_CLEAN_DEPTH | WAIT_FOR_ME`).
 - Several heavier/lighter and alternative-mechanism gears were tried and **falsified** — the
   decision log is preserved in [`PATCHES.md`](PATCHES.md) and [`GEARS.md`](GEARS.md) precisely so
   the negative results aren't re-walked.
