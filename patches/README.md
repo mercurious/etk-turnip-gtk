@@ -6,8 +6,9 @@ Apply onto a fresh upstream clone with [`../scripts/prepare-fork-branch.sh apply
 
 | Patch | What it is | Status |
 |-------|-----------|--------|
-| `0001-ETK-GTK-gears-…` | The load-bearing gears: `sddepth`/LSD depth-cache barriers + `dimlog`, in `tu_cmd_buffer.cc` + `tu_util.{cc,h}`. Squashed, because the source tree imported them as one commit with no stock baseline between. | **Kept** (`sddepth` is the shipped default) |
+| `0001-ETK-GTK-gears-…` | The LSD FPS-recovery gears: `sddepth`/`sdmem`/`sdme` depth-cache barriers + `dimlog`, in `tu_cmd_buffer.cc` + `tu_util.{cc,h}`. Squashed, because the source tree imported them as one commit with no stock baseline between. | **Kept** (default-off; FPS levers — `syncdraw` owns stability) |
 | `0002-Patch-3-B-ccuhalf-ccuquarter-…` | Cap a6xx depth CCU cache size. | Falsified (see [`../PATCHES.md`](../PATCHES.md)) |
+
 | `0003-Patch-3-A-dsbypass-…` | Selective sysmem for depth-storing renderpasses. | Falsified |
 | `0004-Refined-A-dsany-…` | Route any depth-attachment renderpass to sysmem. | Falsified |
 

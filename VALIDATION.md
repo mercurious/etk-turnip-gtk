@@ -23,15 +23,19 @@ across repeated runs, with the mechanism confirmed from the logs.
 ## Signal, not crash-rate
 
 Measure **duration and time-to-crash ceiling**, not a binary "clean/crashed" rate — the latter is
-biased by the variance above. The headline result for `sddepth` was a median session-duration lift
-(≈171 s → ≈286 s, ≈+67%) and a longer clean-play length on a saturated vault, with `tune_tag`
-stamped per session so each run attributes to the gear it ran under.
+biased by the variance above. The headline stability result on the ledger — a median
+session-duration lift (≈171 s → ≈286 s, ≈+67% on a saturated vault) — belongs to the **`syncdraw`**
+tuning campaign, **not** to any fork gear. `tune_tag` is stamped per session so each run attributes
+to the dial it actually ran under; keep that attribution honest when comparing.
 
-## Frametime jitter
+## What the fork gears are measured *for*
 
-Frametime consistency (`ft_jitter_ms`, extracted post-session) is a secondary axis: a gear that holds
-the run together but shreds frame pacing is not a win. `sddepth` was checked to be FPS-neutral on this
-metric, not just hang-frequency-positive.
+Because the fork gears (`sddepth` et al.) are FPS levers, not a stability win, the axis that
+adjudicates them is **framerate / frametime**, not crash-rate — the ledger has no FPS column, so
+stability numbers alone cannot rank `sddepth` against `syncdraw`. Frametime consistency
+(`ft_jitter_ms`, extracted post-session) plus measured FPS is the real comparison. On stability,
+expect a fork gear to do **no better than `syncdraw`** (and `sddepth` to do somewhat worse) — the
+question a gear has to answer is whether the FPS it buys is worth that stability cost.
 
 ## Reproducing a comparison
 

@@ -11,25 +11,31 @@ ETK, set them via the `TU_DEBUG` environment variable.
 
 ## Fork gears
 
+The gears are **FPS-recovery levers**, lighter than `syncdraw`. None of them beats `syncdraw` on
+stability — they trade serialization back for framerate. For crash-avoidance, use stock `syncdraw`
+(see below).
+
 | Flag | Barrier emitted | Notes | Status |
 |------|-----------------|-------|--------|
-| `sddepth` | `WAIT_MEM_WRITES \| CCU_CLEAN_DEPTH \| WAIT_FOR_ME` | Serializes after the depth store-resolve; **no full WFI** — lighter than upstream `syncdraw` | **Load-bearing.** ~50–67% hang-frequency reduction; recommended default |
-| `sdmem` | `WAIT_MEM_WRITES \| WAIT_FOR_ME` | Skips the CCU depth clean | Holds, FPS-neutral vs `sddepth` |
-| `sdme` | `WAIT_FOR_ME` only | Minimal barrier | Holds; lighter |
-| `sdclean` | `CCU_CLEAN_DEPTH` only | Cache clean, no waits | Stable but slowest (no `WAIT_MEM`) |
-| `sdgate` | `sddepth`, gated to depth-writing draws only | ~93% of GT5P draws write depth, so the gate is ~null | No measurable FPS gain over `sddepth` |
+| `sddepth` | `WAIT_MEM_WRITES \| CCU_CLEAN_DEPTH \| WAIT_FOR_ME` | Lighter than `syncdraw` (no full WFI); recovers FPS in GPU-bound scenes | Most stable of the lighter gears, **but more crash-prone than `syncdraw`** |
+| `sdmem` | `WAIT_MEM_WRITES \| WAIT_FOR_ME` | Drops the CCU depth clean | **Falsified** — survival collapses (~33%) vs `sddepth` |
+| `sdme` | `WAIT_FOR_ME` only | Minimal barrier | **Falsified** — did not hold (0/2) |
+| `sdclean` | `CCU_CLEAN_DEPTH` only | Cache clean, no waits | Experimental; lighter still |
+| `sdgate` | `sddepth`, gated to depth-writing draws only | ~93% of GT5P draws write depth, so the gate is ~null | No measurable gain over `sddepth` |
 | `dmlog` | — | Logs resolve operations; instrumentation only | Decode/analysis helper |
 
-**Default recommendation:** `sddepth`. It is the lightest gear that carries the measured stability
-gain; the lighter gears (`sdmem`/`sdme`/`sdclean`) hold but give up the depth-cache clean that
-appears to matter, and `sdgate` adds gating complexity for no benefit on this workload.
+**Recommendation:** for stability, use stock **`syncdraw`** — it is the best-tested dial and the
+accepted floor. Reach for `sddepth` only when you want to claw back framerate in GPU-bound sections
+and accept a higher crash risk than `syncdraw`. Going lighter than `sddepth` (`sdmem`/`sdme`) is
+falsified — the depth-cache clean is what keeps the lighter gear from collapsing.
 
 ## Relevant upstream `TU_DEBUG` flags (for reference)
 
-These are stock Mesa flags, not added by the fork, but they were part of the isolation work:
+These are stock Mesa flags, not added by the fork:
 
-- `syncdraw` — `CP_WAIT_FOR_IDLE` after every draw. The full sledgehammer; `sddepth` is the
-  lighter, targeted refinement of the same idea.
+- `syncdraw` — `CP_WAIT_FOR_IDLE` after every draw. **The preferred, best-tested stability dial**
+  on these titles; the fork's `sddepth` is a lighter FPS-recovery variant that does *not* match it
+  on stability.
 - `nolrz`, `noubwc` — exonerated (hang persists with them set).
 - `sysmem`, `gmem` — render-mode selection; the hang is mode-independent.
 - `nobin`, `forcebin`, `nocb`, `noconcurrentresolves`, `flushall` — other levers, lower priority,

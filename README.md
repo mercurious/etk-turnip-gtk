@@ -27,26 +27,33 @@ so `git log mesa-26.1.3..` shows exactly the delta. See [`scripts/prepare-fork-b
 
 ## What this adds
 
-The fork grafts a set of opt-in **TU_DEBUG gears** at a single emit site
-(`tu6_emit_flushes()` in `src/freedreno/vulkan/tu_cmd_buffer.cc`) — lightweight depth-cache
-serialization barriers that reduce GPU-hang frequency on GPU-bound scenes without the cost of a
-full wait-for-idle.
+**Stability is owned by the stock `syncdraw` dial, not by this fork.** On these GT titles the
+best-tested, preferred stability setting is upstream Turnip's `syncdraw` (a `CP_WAIT_FOR_IDLE` after
+every draw) — the accepted stability floor. This fork does not improve on it for crash-avoidance.
 
-- The optimal load-bearing gear is **`syncdraw`** (`WAIT_MEM_WRITES | CCU_CLEAN_DEPTH | WAIT_FOR_ME`).
-- Several heavier/lighter and alternative-mechanism gears were tried and **falsified** — the
-  decision log is preserved in [`PATCHES.md`](PATCHES.md) and [`GEARS.md`](GEARS.md) precisely so
+What the fork adds is a set of opt-in, lighter **TU_DEBUG gears** at a single emit site
+(`tu6_emit_flushes()` in `src/freedreno/vulkan/tu_cmd_buffer.cc`) whose purpose is **FPS recovery**:
+they trade some of `syncdraw`'s full per-draw serialization back for framerate in GPU-bound scenes.
+They are `TU_DEBUG`-gated and **default-off** — selecting one is a deliberate FPS-vs-stability trade.
+
+- The lighter gears are `sddepth` / `sdmem` / `sdme` (composed from
+  `WAIT_MEM_WRITES | CCU_CLEAN_DEPTH | WAIT_FOR_ME`). Going lighter than `sddepth` collapses
+  stability (the depth-cache clean is what holds it together); `sddepth` is the most stable of the
+  lighter gears **but is more crash-prone than `syncdraw`**.
+- Several alternative-mechanism gears (cache-sizing, sysmem routing) were tried and **falsified** —
+  the decision log is preserved in [`PATCHES.md`](PATCHES.md) and [`GEARS.md`](GEARS.md) precisely so
   the negative results aren't re-walked.
 
 See [`GEARS.md`](GEARS.md) for the full flag semantics and [`VALIDATION.md`](VALIDATION.md) for the
-reproducible A/B protocol behind the numbers.
+A/B protocol.
 
 ## What it does *not* do
 
-The mitigated fault has a **root cause that remains unresolved** — an upstream 3D draw whose
-fragment shader fails to retire on this GPU, after which the command processor wedges at the next
-wait and hangcheck reaps it. `sddepth` is a **mitigation, not a cure**: it lowers hang frequency
-(~50–67% in the measured workload) but residual hangs remain in low-RAM / high-resolution contexts.
-The full fault decode is in [`PATCHES.md`](PATCHES.md).
+It does **not** cure the underlying hang. The fault's root cause remains unresolved — an upstream 3D
+draw whose fragment shader fails to retire on this GPU, after which the command processor wedges at
+the next wait and hangcheck reaps it. The hang is **managed** (via `syncdraw`), not fixed, and none
+of the fork's lighter gears beat `syncdraw` on stability. The full fault decode is in
+[`PATCHES.md`](PATCHES.md).
 
 ---
 
