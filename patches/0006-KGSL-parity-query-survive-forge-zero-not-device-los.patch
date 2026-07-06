@@ -1,0 +1,139 @@
+--- a/src/freedreno/vulkan/tu_query_pool.cc	2026-07-05 18:25:45
++++ b/src/freedreno/vulkan/tu_query_pool.cc	2026-07-05 18:27:04
+@@ -12,6 +12,7 @@
+ 
+ #include "nir/nir_builder.h"
+ #include "util/os_time.h"
++#include "util/u_debug.h"
+ #include "vk_acceleration_structure.h"
+ #include "vk_util.h"
+ 
+@@ -584,17 +585,47 @@
+  * in practice (fork-local pragmatism; reset on every available query). */
+ static uint32_t etk_wait_timeout_strikes = 0;
+ 
+-/* Wait on the the availability status of a query up until a timeout. */
++/* KGSL parity — the userspace companion to the kernel's msm.context_keepalive
++ * (ETK mission d, 2026-07-05). When the kernel keeps a hung context alive
++ * (parity kernel, param on), the submit that hangcheck recovery SKIPPED never
++ * writes its query's availability word, so a poll on that query would spin
++ * forever. The stock GTK build (t3devlost2/4b below) breaks that spin by
++ * declaring the device lost — a clean tear-down (the crash-net). Survive mode
++ * instead forges an available, zero-valued result so the app's rsx poll
++ * unparks and the race CONTINUES — one wrong (fully-occluded) frame instead of
++ * a lost device, matching how Android/KGSL absorbs this same hang. Default off
++ * = the stock crash-net, so this build is behaviour-identical until the flag is
++ * set (mirrors the kernel param's default-off design). */
++static bool
++etk_query_survive(void)
++{
++   static int cached = -1;
++   if (cached < 0)
++      cached = debug_get_bool_option("TU_ETK_QUERY_SURVIVE", false);
++   return cached;
++}
++
++/* A healthy occlusion query resolves in ms; nothing legitimate stays
++ * unavailable this long on a working GPU, so this doubles as the "its submit
++ * was dropped" signal AND bounds the parity stutter to ~1.5 s. */
++#define ETK_SURVIVE_UNAVAIL_NS (1500ull * 1000 * 1000)
++
++/* Wait on the the availability status of a query up until a timeout.
++ * In survive mode, *etk_dropped is set true when the query is judged dropped
++ * (never coming) so the caller forges a zero result instead of losing the
++ * device. */
+ static VkResult
+ wait_for_available(struct tu_device *device, struct tu_query_pool *pool,
+-                   uint32_t query)
++                   uint32_t query, bool *etk_dropped)
+ {
+    /* TODO: Use the MSM_IOVA_WAIT ioctl to wait on the available bit in a
+     * scheduler friendly way instead of busy polling once the patch has landed
+     * upstream. */
+    struct query_slot *slot = slot_address(pool, query);
++   *etk_dropped = false;
++   bool survive = etk_query_survive();
+    uint64_t abs_timeout = os_time_get_absolute_timeout(
+-         WAIT_TIMEOUT * NSEC_PER_SEC);
++         survive ? ETK_SURVIVE_UNAVAIL_NS : (WAIT_TIMEOUT * NSEC_PER_SEC));
+    /* ETK Tier-3 (787B reframe, 2026-07-04): consult device status while
+     * waiting. After a kernel hangcheck recovery this query can never become
+     * available; the stock path returned VK_TIMEOUT (nonconformant for
+@@ -621,6 +652,15 @@
+    VkResult device_status = vk_device_check_status(&device->vk);
+    if (device_status != VK_SUCCESS)
+       return device_status;
++   /* KGSL parity: the query's submit was dropped by a hangcheck recovery and
++    * will never post. Rather than declare the device lost, tell the caller to
++    * forge a zero result and continue (the ~1.5 s wait above already bounded
++    * the stutter). */
++   if (survive) {
++      *etk_dropped = true;
++      etk_wait_timeout_strikes = 0;
++      return VK_SUCCESS;
++   }
+    /* ETK t3devlost2: kernel 7.0.11 does NOT advance MSM_PARAM_FAULTS for
+     * hangcheck-class recoveries (verified live on the HSL boss: this loop's
+     * 10 ms status checks ran for 90+ s against a flat counter while dmesg
+@@ -701,6 +741,9 @@
+       bool available = query_is_available(slot);
+       uint32_t result_count = get_result_count(pool);
+       uint32_t statistics = pool->vk.pipeline_statistics;
++      /* KGSL parity: set when this query's submit was dropped by a hangcheck
++       * recovery — its result is forged to zero (see etk_query_survive). */
++      bool etk_forced_zero = false;
+ 
+       /* ETK t3devlost4b: per-object staleness, flag-agnostic. v4 gated the
+        * stamp behind !(flags & PARTIAL) — falsified live 2026-07-05: this
+@@ -714,6 +757,16 @@
+          pool->etk_unavail_since_ns = 0;
+       } else if (pool->etk_unavail_since_ns == 0) {
+          pool->etk_unavail_since_ns = etk_now_ns;
++      } else if (etk_query_survive() &&
++                 etk_now_ns - pool->etk_unavail_since_ns >
++                    ETK_SURVIVE_UNAVAIL_NS) {
++         /* KGSL parity, partial/ZCULL-poke path (RPCS3 polls this query with
++          * PARTIAL|WITH_AVAILABILITY, so it never takes the WAIT_BIT branch
++          * below): the submit was dropped by a hangcheck recovery. Forge a
++          * zero result and continue instead of losing the device. */
++         etk_forced_zero = true;
++         available = true;
++         pool->etk_unavail_since_ns = 0;
+       } else if (etk_now_ns - pool->etk_unavail_since_ns >
+                  30ull * 1000 * 1000 * 1000) {
+          return vk_device_set_lost(&device->vk,
+@@ -723,10 +776,13 @@
+       }
+ 
+       if ((flags & VK_QUERY_RESULT_WAIT_BIT) && !available) {
+-         VkResult wait_result = wait_for_available(device, pool, query);
++         bool etk_dropped = false;
++         VkResult wait_result =
++            wait_for_available(device, pool, query, &etk_dropped);
+          if (wait_result != VK_SUCCESS)
+             return wait_result;
+          available = true;
++         etk_forced_zero = etk_dropped;
+       } else if (!(flags & VK_QUERY_RESULT_PARTIAL_BIT) && !available) {
+          /* From the Vulkan 1.1.130 spec:
+           *
+@@ -745,7 +801,18 @@
+       }
+ 
+       for (uint32_t k = 0; k < result_count; k++) {
+-         if (available) {
++         if (available && etk_forced_zero) {
++            /* KGSL parity: dropped-submit query — its GPU result memory was
++             * never written (stale/garbage), so forge a valid zero rather than
++             * copy it out. Availability below still reports 1 (done). */
++            uint64_t zero = 0;
++            if (pool->vk.query_type == VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR)
++               write_performance_query_value_cpu(
++                  result_base, k, VK_PERFORMANCE_COUNTER_STORAGE_UINT64_KHR,
++                  &zero);
++            else
++               write_query_value_cpu(result_base, k, &zero, flags);
++         } else if (available) {
+             uint64_t *result;
+ 
+             if (pool->vk.query_type == VK_QUERY_TYPE_PIPELINE_STATISTICS) {

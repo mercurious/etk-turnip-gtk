@@ -100,3 +100,26 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
 - **Note:** ETK builds also carry two diagnostic-only `mesa_logi` lines in
   `tu_knl_drm_msm.cc` (`[ETK T0-checkstatus]` lineage markers); omitted from the series as
   non-functional.
+
+### Patch #6 — `kgsl-parity` query-survive: forge zero instead of device-lost (BUILT; on-track validation pending)
+- **Files:** `src/freedreno/vulkan/tu_query_pool.cc` (`patches/0006-...`). Builds on Patch #5.
+- **The shift:** Patch #5's philosophy is *tolerance* — answer `VK_ERROR_DEVICE_LOST` so the app
+  tears down cleanly (a ~1 s stop). Patch #6 is *parity* — when the paired ROCKNIX-GTK kernel keeps
+  the hung context alive (`msm.context_keepalive=1`, which does NOT ban the VM nor bump the fault
+  counter), the dropped query can instead be forged: report it AVAILABLE with value 0 (one wrong,
+  fully-occluded frame) so the app's poll unparks and the race CONTINUES — matching how Android/KGSL
+  absorbs the same hang.
+- **The design:** env-gated `TU_ETK_QUERY_SURVIVE` (default off = Patch #5's device-lost, so the
+  build is behaviour-identical until set). Both dropped-query verdicts in `get_query_pool_results`
+  — the `wait_for_available` WAIT_BIT strike path and the PARTIAL/ZCULL-poke staleness path — get a
+  survive branch that forges an available zero result (WITH_AVAILABILITY still reports 1/done).
+  Threshold `ETK_SURVIVE_UNAVAIL_NS = 1.5 s` doubles as the "submit was dropped" signal and bounds
+  the stutter. Never marks the device lost, so submits keep flowing.
+- **Requires the parity kernel** — without `msm.context_keepalive` the forged query is followed by an
+  `-EPIPE` on the next submit. This is one half of a kernel+driver pair, not standalone.
+- **Verdict (honest):** BUILT, compiles, loads, mechanism-correct; **NOT yet on-track validated.** The
+  query-poll wedge (a6xx `00C5xxxx`, GT5P 787B) did not reproduce across a full 2026-07-05 session —
+  every boss hit (GT5P HSL, GT HD Concept, London/GT HD EU) was the `00E5xxxx` **fence**-path wedge,
+  which this patch does NOT cover: RPCS3 spins `vkGetFenceStatus(timeout=0)` and never reaches the
+  query path. Cross-title, the fence poll is the dominant real-play wedge; a fence-path survive (the
+  `vk_fence.c` twin of this, plus an emulator-side force-signal) is the next patch.
