@@ -19,6 +19,23 @@ across repeated runs, with the mechanism confirmed from the logs.
    this way.
 5. **Rule out our own code first.** Before blaming hardware (cable/card/thermals), confirm the fault
    reproduces independent of the gear and the bind.
+6. **Attribute every run to a build.** `vulkaninfo | grep driverInfo` must report
+   `Mesa <ver> (git-<sha>) ETK-GTK` before recording anything. With several drivers selectable in
+   Pitstop, an unattributable result is not a result. See [`BUILDING.md`](BUILDING.md).
+7. **Re-baseline after a base bump.** Verdicts are only comparable within one upstream base. The
+   26.1.3 → 26.1.6 bump moved the flush baseline (`blit_cache_cleaned` — see
+   [`PATCHES.md`](PATCHES.md)) and the tile-division backport moved the tiling baseline. Re-run the
+   stock `syncdraw` control on the new base **before** ranking any gear against it; comparing a
+   26.1.6 gear to a 26.1.3-era floor is not a measurement.
+
+## Falsify cheaply before you A/B
+
+An N≥3 saturated-vault A/B is expensive. Where a gear has a *reachability* precondition, test that
+first with instrumentation — one session, not nine. `zlatez` is the current example: with
+`TU_DEBUG=dimlog` and no z-gear set, the driver logs `[ETK zlatez] hazard state reached: …` the
+first time the hazard state is entered. If that line never appears on the reference workload, both
+z-gears are inert and the hypothesis is dead without a single A/B run. If it does appear, the
+reported `depth_format=` tells you which gear to reach for. See [`GEARS.md`](GEARS.md).
 
 ## Signal, not crash-rate
 
@@ -39,7 +56,7 @@ question a gear has to answer is whether the FPS it buys is worth that stability
 
 ## Reproducing a comparison
 
-1. Build both `.so` files (stock `mesa-26.1.3` and the fork) — see [`BUILDING.md`](BUILDING.md).
+1. Build both `.so` files (stock `mesa-26.1.6` and the fork) — see [`BUILDING.md`](BUILDING.md).
 2. Stage both under the driver catalog and select via the DRIVER tab; **cold boot** between swaps.
 3. Warm the vault (one launch to menu), then run the fixed race scenario N≥3 per build.
 4. Compare duration / time-to-crash and `ft_jitter_ms`, not pass/fail counts.

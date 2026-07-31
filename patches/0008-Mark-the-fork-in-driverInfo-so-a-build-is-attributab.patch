@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mercurious <dutch.money@gmail.com>
+Date: Thu, 30 Jul 2026 19:52:53 -0400
+Subject: [PATCH 8/8] Mark the fork in driverInfo so a build is attributable at
+ runtime
+
+Stock and fork both report bare "Mesa <version>" from vulkaninfo, so with
+several drivers selectable through the Pitstop DRIVER tab there was no way
+to confirm which .so produced a given A/B result other than comparing
+sha256 of the bound file. That is a real hazard for a project whose output
+is A/B verdicts.
+
+driverInfo becomes "Mesa <version> (git-<sha>) ETK-GTK". MESA_GIT_SHA1
+supplies the per-build discriminator, and the literal suffix answers "is
+this the fork at all?" at a glance. The numeric version is deliberately
+left untouched: RPCS3 applies driver-version-keyed workarounds and parses
+this string, so a non-numeric version suffix could change emulator
+behaviour and confound the very comparison this is meant to enable.
+
+This was previously a local uncommitted edit in the build tree, so it was
+absent from the published series and would have been lost on the first
+rebase. Carrying it as a patch fixes that.
+---
+ src/freedreno/vulkan/tu_device.cc | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/freedreno/vulkan/tu_device.cc b/src/freedreno/vulkan/tu_device.cc
+index be6f618..8a53b4d 100644
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -935,8 +935,18 @@ tu_get_physical_device_properties_1_2(struct tu_physical_device *pdevice,
+    snprintf(p->driverName, VK_MAX_DRIVER_NAME_SIZE,
+             "turnip Mesa driver");
+    memset(p->driverInfo, 0, sizeof(p->driverInfo));
++   /* ETK: mark the fork in driverInfo so a build is attributable at runtime.
++    * PACKAGE_VERSION alone is identical between stock and fork, and Pitstop can
++    * hold several drivers at once, so an A/B result would otherwise be
++    * unattributable. MESA_GIT_SHA1 supplies the per-build discriminator (it is
++    * populated whenever git is on PATH at build time and the tree is a git
++    * checkout -- which prepare-fork-branch.sh always produces); the literal
++    * suffix makes "is this the fork at all?" answerable at a glance.
++    * Kept in the standard "Mesa <ver> (git-<sha>)" shape on purpose: RPCS3
++    * applies driver-version-keyed workarounds and parses this string, so the
++    * numeric version must stay untouched. */
+    snprintf(p->driverInfo, VK_MAX_DRIVER_INFO_SIZE,
+-            "Mesa " PACKAGE_VERSION MESA_GIT_SHA1);
++            "Mesa " PACKAGE_VERSION MESA_GIT_SHA1 " ETK-GTK");
+    if (pdevice->info->chip >= 7) {
+       p->conformanceVersion = (VkConformanceVersion) {
+          .major = 1,
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,7 +1,8 @@
-# Gears — `TU_DEBUG` barrier flags added by this fork
+# Gears — `TU_DEBUG` flags added by this fork
 
-All gears are implemented at a single site, `tu6_emit_flushes()` in
-`src/freedreno/vulkan/tu_cmd_buffer.cc`. They are opt-in via `TU_DEBUG` and have **no effect
+The barrier gears are implemented at a single site, `tu6_emit_flushes()` in
+`src/freedreno/vulkan/tu_cmd_buffer.cc`. The Patch #7 z-mode gears sit at a second site,
+`tu6_build_depth_plane_z_mode()` in the same file. All are opt-in via `TU_DEBUG` and have **no effect
 unless selected**, so the fork is a strict superset of stock behavior.
 
 On the rig these are not hand-written; they're applied through the **Pitstop DRIVER tab**, which
@@ -22,7 +23,47 @@ stability — they trade serialization back for framerate. For crash-avoidance, 
 | `sdme` | `WAIT_FOR_ME` only | Minimal barrier | **Falsified** — did not hold (0/2) |
 | `sdclean` | `CCU_CLEAN_DEPTH` only | Cache clean, no waits | Experimental; lighter still |
 | `sdgate` | `sddepth`, gated to depth-writing draws only | ~93% of GT5P draws write depth, so the gate is ~null | No measurable gain over `sddepth` |
-| `dmlog` | — | Logs resolve operations; instrumentation only | Decode/analysis helper |
+| `dimlog` | — | Instrumentation only: GMEM render-target/bin dims + ragged remainder at tiling setup, and the `zlatez` reachability probe below | Decode/analysis helper |
+
+## Z-mode gears (Patch #7) — a different mechanism
+
+`zlatez` is **not** a barrier gear and does not belong to the FPS-vs-stability trade above. It is a
+stability experiment on a different axis, and the first fork gear that is not a *resolve* mechanism —
+which matters, because every falsified gear in [`PATCHES.md`](PATCHES.md) was one.
+
+Upstream forces `A6XX_LATE_Z` for `A6XX_EARLY_Z_LATE_Z` + `D32_SFLOAT_S8_UINT` + a killing fragment
+shader, under the in-tree comment *"A630/A650 hangs with this combination of states"*. That is this
+fork's GPU and a fragment-stage wedge — the shape of the reference fault. The ETK workload is Z24S8,
+so the format gate is the only thing keeping that workaround off it.
+
+| Flag | Effect | Notes | Status |
+|------|--------|-------|--------|
+| `zlatez` | Extends the upstream workaround to `D24_UNORM_S8_UINT` | **The confirmed format** — use this one | Built; **A/B pending** |
+| `zlatezany` | Drops the format gate entirely — any depth format | Not needed: the probe identified the format | Built; superseded by `zlatez` |
+
+**Run the probe before the gear.** With `TU_DEBUG=dimlog` and *no* z-gear set, the driver logs once:
+
+```
+[ETK zlatez] hazard state reached: EARLY_Z_LATE_Z + fs_kill_fragments, depth_format=… depth_write=… stencil_write=…
+```
+
+If that line never appears, the hazard state is never entered, both gears are inert, and the
+hypothesis dies for the price of one session instead of an N≥3 A/B.
+
+**Probe result (2026-07-30, GT5P BCUS98158, `gtk_0.5`):** it appears — with
+`depth_format=VK_FORMAT_D24_UNORM_S8_UINT depth_write=1 stencil_write=0`. The workload enters the
+hazardous state in exactly the format upstream's `D32S8` gate excludes, so `zlatez` is the gear to
+race and `zlatezany` can stay on the shelf.
+
+> The `[ETK …]` lines go to `MESA_LOG_FILE` (rig: `etk_telemetry/t0probe.log` via profile.d
+> `099-etk-t0probe-log`), **not** `RPCS3.log` — `mesa_logi` writes to stderr. Grepping the wrong
+> file returns zero hits and reads exactly like a falsified hypothesis.
+
+> `dimlog` is **not free**: 26,924 lines / 2.7 MB in a 440 s session, and the run's frametimes
+> showed it. Use it to answer a reachability question, then turn it off before measuring anything.
+
+Because both gears are a strict *widening of an existing upstream workaround* rather than a new
+mechanism, a positive result is directly reportable as a freedreno merge request.
 
 **Recommendation:** for stability, use stock **`syncdraw`** — it is the best-tested dial and the
 accepted floor. Reach for `sddepth` only when you want to claw back framerate in GPU-bound sections

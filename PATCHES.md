@@ -1,8 +1,8 @@
 # Patch history & decision log
 
-The fork is a short series carried over `mesa-26.1.3`. This file records **what was tried, what was
-kept, and what was falsified** — the negative results are part of the deliverable, so the dead ends
-aren't re-walked by anyone reading the source.
+The fork is a short series carried over `mesa-26.1.6` (rebased from `mesa-26.1.3` on 2026-07-30).
+This file records **what was tried, what was kept, and what was falsified** — the negative results
+are part of the deliverable, so the dead ends aren't re-walked by anyone reading the source.
 
 ## The fault being mitigated (decoded)
 
@@ -109,8 +109,17 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   counter), the dropped query can instead be forged: report it AVAILABLE with value 0 (one wrong,
   fully-occluded frame) so the app's poll unparks and the race CONTINUES — matching how Android/KGSL
   absorbs the same hang.
-- **The design:** env-gated `TU_ETK_QUERY_SURVIVE` (default off = Patch #5's device-lost, so the
-  build is behaviour-identical until set). Both dropped-query verdicts in `get_query_pool_results`
+- **The design:** gated by `TU_ETK_QUERY_SURVIVE`, **default ON**, with `TU_ETK_QUERY_SURVIVE=0` as
+  the kill-switch back to Patch #5's device-lost.
+
+  > **Default corrected 2026-07-30 — and why it matters beyond this patch.** The default was
+  > originally *off* (opt-in for a new mechanism). But the certified `gtk_0.4` driver was built with
+  > it flipped **on**, and that flip existed only as an *uncommitted edit in the build tree* — so
+  > this published series did not reproduce the shipped driver. A rebuild from these patches
+  > silently dropped the survive net, which is exactly what happened to `gtk_0.5`: it went to the
+  > track with the net disabled and nobody could have told from the source. The lesson is not about
+  > this flag: **anything that only exists as a working-tree edit is not part of the fork.** If the
+  > series doesn't rebuild the shipped `.so`, the series is wrong. Both dropped-query verdicts in `get_query_pool_results`
   — the `wait_for_available` WAIT_BIT strike path and the PARTIAL/ZCULL-poke staleness path — get a
   survive branch that forges an available zero result (WITH_AVAILABILITY still reports 1/done).
   Threshold `ETK_SURVIVE_UNAVAIL_NS = 1.5 s` doubles as the "submit was dropped" signal and bounds
@@ -123,3 +132,115 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   which this patch does NOT cover: RPCS3 spins `vkGetFenceStatus(timeout=0)` and never reaches the
   query path. Cross-title, the fence poll is the dominant real-play wedge; a fence-path survive (the
   `vk_fence.c` twin of this, plus an emulator-side force-signal) is the next patch.
+
+### Patch #7 — `zlatez` / `zlatezany` z-mode gears (BUILT 2026-07-30; the open experiment)
+- **Files:** `src/freedreno/vulkan/tu_cmd_buffer.cc` (`tu6_build_depth_plane_z_mode()`),
+  `tu_util.{cc,h}` (`patches/0007-…`). Builds on backport `a70d2af590db`.
+- **Why this one is different.** Every mechanism above is a *resolve* mechanism, and every one of
+  them falsified. This is the first candidate that is not — it targets the **fragment stage**, which
+  is where the decode at the top of this file says the fault actually lives.
+- **The upstream evidence.** Mesa 26.2 carries `a70d2af590db`, which forces `A6XX_LATE_Z` for
+  `A6XX_EARLY_Z_LATE_Z` + `D32_SFLOAT_S8_UINT` + `fs_kill_fragments`. Its in-tree comment reads
+  verbatim: `/* A630/A650 hangs with this combination of states. */`. That names **this fork's GPU**,
+  and `fs_kill_fragments` (discard / `gl_SampleMask` write / alpha-to-coverage) means a killing
+  fragment shader — matching "an upstream 3D draw whose fragment shader fails to retire". Upstream
+  already carries a *second* `EARLY_Z_LATE_Z` wedge workaround immediately above it, so this Z-mode
+  is independently known to be hazardous on a6xx.
+- **The gap, stated plainly.** The upstream workaround gates on **D32S8**; the ETK reference target
+  is **Z24S8**. So it does **not** fire on GT5P as written. The format gate is the only thing
+  standing between the two. That is the whole hypothesis.
+- **The design:** two default-off `TU_DEBUG` gears that widen the gate — `zlatez` adds
+  `D24_UNORM_S8_UINT`, `zlatezany` drops the format condition entirely — plus a `dimlog`-gated
+  one-shot probe that fires **with no gear set**, reporting the first time the hazard state is
+  reached and in which format. Run the probe first: if the line never appears, the hypothesis is
+  falsified for the cost of one session instead of an N≥3 A/B.
+- **Verdict:** **PROBE POSITIVE (2026-07-30, first track run) — the hypothesis survived its
+  falsification test.** `gtk_0.5` on the rig, `TU_DEBUG=dimlog`, no z-gear, GT5P (BCUS98158,
+  US disc), 440 s to a wedge. The probe fired exactly once, as designed:
+
+  ```
+  [ETK zlatez] hazard state reached: EARLY_Z_LATE_Z + fs_kill_fragments,
+  depth_format=VK_FORMAT_D24_UNORM_S8_UINT depth_write=1 stencil_write=0
+  ```
+
+  The workload **does** enter the state upstream names as wedging A630/A650, and it does so in
+  **`D24_UNORM_S8_UINT`** — precisely the format upstream's `D32S8` gate excludes. So:
+  - the format gate really is the only thing keeping the upstream workaround off this workload;
+  - **`zlatez` is the correct gear; `zlatezany` is not needed** (the format is known now);
+  - the gear itself is still **UNVALIDATED** — it was not enabled on this run, by design. The run
+    tested reachability, which is the cheap question, before spending an N≥3 A/B on the expensive one.
+
+  The same run also confirmed the hang is unchanged by the 26.1.6 rebase + both backports alone:
+  `status 00E59005`, ring 0, offending task `RSX Offloader`, `hangcheck recover!` →
+  `context_keepalive: surviving hang`. Ledger `SURVIVED:Adreno / KEEPALIVE_SURVIVE,GPU_FENCE_TIMEOUT`.
+  That is the known fence-path wedge, and the exit to ES is the tolerance net behaving correctly,
+  not a new failure mode.
+
+  **Do not read that run's FPS** (`fps_med 19.8`, `ft_p99 250 ms`, `jitter 8.2` vs a 26.6/75/2.9
+  baseline). Three confounds: `dimlog` wrote **26,924 lines / 2.7 MB in 440 s** (~61 flash writes/s
+  — the diagnostic is *not* free), the baseline rows are NPEA00050 while this was BCUS98158, and
+  those rows ran `default` dials. Turn `dimlog` off for any perf or stability comparison.
+
+- **Where the driver's log actually goes:** `mesa_logi` writes to **stderr**, which `RPCS3.log` does
+  not capture. On the rig, profile.d entry `099-etk-t0probe-log` sets
+  `MESA_LOG_FILE=$TELEMETRY_DIR/t0probe.log` — that is the only place `[ETK …]` lines appear.
+  Grepping `RPCS3.log` returns zero hits and looks exactly like a negative result. It isn't one.
+- **Upstreamability:** because it is a strict widening of an existing upstream workaround rather than
+  a new mechanism, a positive result is directly reportable as a freedreno MR.
+
+### Patch #8 — `driverInfo` fork marker (KEPT)
+- **Files:** `src/freedreno/vulkan/tu_device.cc` (`patches/0008-…`).
+- **The problem:** stock and fork both reported bare `Mesa <version>`, so with several drivers
+  selectable through the Pitstop DRIVER tab, an A/B result could not be attributed to a build except
+  by `sha256sum` of the bound file. For a project whose entire output is A/B verdicts, that is a
+  correctness hazard, not a nicety.
+- **The change:** `driverInfo` becomes `Mesa <version> (git-<sha>) ETK-GTK`. The numeric version is
+  deliberately left untouched — RPCS3 applies driver-version-keyed workarounds and parses this
+  string, so a non-numeric version suffix could change emulator behaviour and confound the very
+  comparison this enables.
+- **Note:** this existed only as an *uncommitted local edit* in the build tree and was absent from
+  the published series — it would have been lost on the first rebase. Carrying it as a patch fixes
+  that.
+
+## Rebase 26.1.3 → 26.1.6 (2026-07-30)
+
+**Cost: near zero.** Of the files the series touches, only `tu_cmd_buffer.cc` changed upstream
+(+12/−12); `tu_util.{cc,h}`, `tu_query_pool.{cc,h}`, `vk_fence.{c,h}` and `tu_knl_drm_msm.cc` were
+byte-identical. The full series applies to both `mesa-26.1.6` and `mesa-26.2.0-rc3` with zero fuzz.
+
+**What 26.1.4/5/6 actually contain for us** (349 commits; most of the turnip delta is inapplicable):
+
+- **On-path:** `tu_pass.cc` "Fix uninitialized `gmem_offset` when a GMEM layout is impossible"
+  (26.1.5) — a `continue` that continued the *inner* loop, so offsets were still assigned from a
+  partially-computed layout. Same bug family as the tile-division backport. `tu_cs.cc`
+  `read_write.start` was not repointed at the BO map on command-stream reset (stale pointer; RPCS3
+  resets command buffers every frame). `maxFragmentInputComponents` 124 → 128.
+- **Not applicable:** the FDM subsampled-metadata / apron / separate-stencil fixes (need
+  `VK_EXT_fragment_density_map`), the `TRANSFORM_FEEDBACK_COUNTER` access-mask fix (no XFB),
+  `turnip/kgsl: close the dma-buf fd` (Android/KGSL — this build is `-Dfreedreno-kmds=msm`), A702 and
+  a7xx-only fixes, and the `msm_bo.c` metadata fix (gallium winsys, not in `libvulkan_freedreno.so`).
+- **Verified neutral:** the `fd6_view.cc` A=1 substitution change. It *is* reached from turnip via
+  `fdl6_format_swiz()`, but the old comment was right that the HW already returns 1 for R/RG; the
+  change only matters for `QCOM_image_processing`, which turnip does not expose.
+- **Baseline shift — carry this into any A/B.** `blit_cache_cleaned` was never being set to `true`,
+  because `tu6_emit_flushes()` zeroes `cache->flush_bits` on entry and the test ran *after* the call.
+  Its only consumer is `tu_flush_dynamic_input_attachments()`, gated on
+  `fs.dynamic_input_attachments_used` — so 26.1.6 removes a **per-draw `WAIT_FOR_IDLE`** if and only
+  if the app uses dynamic rendering with input attachments. If RPCS3 does, the `syncdraw` floor was
+  silently benefiting from that WFI and pre-26.1.6 verdicts are not comparable. Re-baseline before
+  ranking any gear.
+
+## Backports carried on the 26.1 line
+
+Two turnip commits ship in 26.2 but were never backported to 26.1.x. Both are in
+`patches/backports/26.1/`; `patches/backports/26.2/` is empty because 26.2 has them natively.
+
+- **`a70d2af590db`** — the A650 `EARLY_Z_LATE_Z` hang workaround. Patch #7 builds on it directly.
+- **`5000d6644db4`** — "Fix tile division algorithm". Intermediate divisor levels were marked
+  initialized without being computed, "leaving their tiling configs full of uninitialized data if one
+  of those levels was ever queried directly". The reference fault is a ragged **`255×510`** depth
+  sub-target (= 256−1, 512−2 — the signature of a tile config derived from a wrong base), and the
+  divisor only escalates above 1 under GMEM pressure via `autotune->get_tile_size_divisor()`, which
+  is exactly the lap-4/5 boss regime. **This is testable with instrumentation the fork already
+  owns:** `dimlog` prints `tile0=`, `bins=` and `rem=` per framebuffer/gmem-layout, so diffing those
+  lines with and without the backport reads directly on whether the ragged bin changes shape.

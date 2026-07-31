@@ -1,0 +1,35 @@
+From a70d2af590db192f87b3af01f83a68b450edb4c3 Mon Sep 17 00:00:00 2001
+From: Danylo Piliaiev <dpiliaiev@igalia.com>
+Date: Thu, 28 May 2026 15:31:47 +0200
+Subject: [PATCH] tu/a6xx: Work around D32S8 EARLY_Z_LATE_Z hang
+
+On A6XX the following state may somehow wedge the GPU causing hang:
+A6XX_EARLY_Z_LATE_Z + D32_SFLOAT_S8_UINT + fs_kill_fragments
+
+Fixes at least Lego Star Wars The Skywalker Saga
+
+Signed-off-by: Danylo Piliaiev <dpiliaiev@igalia.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41858>
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 59c125e532be..9d6292cd4cab 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -8054,6 +8054,11 @@ tu6_build_depth_plane_z_mode(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+       zmode = A6XX_LATE_Z;
+    }
+ 
++   /* A630/A650 hangs with this combination of states. */
++   if (CHIP == A6XX && zmode == A6XX_EARLY_Z_LATE_Z && depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT &&
++       fs_kill_fragments)
++      zmode = A6XX_LATE_Z;
++
+    if ((stencil_test_enable && depth_format == VK_FORMAT_S8_UINT) ||
+        (ds_test_enable &&
+         (fs->fs.lrz.force_late_z || cmd->state.lrz.force_late_z)))
+-- 
+GitLab
+

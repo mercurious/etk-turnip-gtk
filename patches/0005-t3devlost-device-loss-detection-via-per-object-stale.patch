@@ -1,0 +1,278 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mercurious <dutch.money@gmail.com>
+Date: Thu, 30 Jul 2026 19:43:13 -0400
+Subject: [PATCH 5/8] t3devlost: device-loss detection via per-object staleness
+
+Kernel 7.0.11 recovers an a6xx hang via hangcheck but does NOT advance
+MSM_PARAM_FAULTS, and never signals the killed submission's fence -- so
+userspace pollers spin forever on an orphan while the recovered GPU keeps
+servicing everyone else. Historically that meant a silent multi-minute
+freeze requiring a manual kill.
+
+Each vk_fence carries a stamp set on its first NOT_READY poll, cleared on
+every observed signal AND on reset: a fence continuously NOT_READY for
+>10s cannot exist on a healthy device, so the device is marked lost. Each
+tu_query_pool carries the same stamp for unavailable-without-WAIT polls
+(>30s, cleared when any query in the pool reads available), applied to ANY
+poll flags -- a live register read proved real callers poll with
+PARTIAL|WITH_AVAILABILITY, which routes around both the NOT_READY return
+and any flag-gated check.
+
+A global dry-spell clock was tried first and falsified in the field: the
+recovered GPU retires healthy neighbour fences (observed: retired-fence
+advanced 15 past the orphan), resetting any global clock forever.
+
+Field-validated on live wedges: the driver now answers
+VK_ERROR_DEVICE_LOST to every post-hangcheck poll within 10-30s worst
+case, typically instantly via the submit path. This is tolerance, not a
+cure for the hang. See PATCHES.md for the full decision log.
+---
+ src/freedreno/vulkan/tu_query_pool.cc | 67 ++++++++++++++++++++++-
+ src/freedreno/vulkan/tu_query_pool.h  |  7 +++
+ src/vulkan/runtime/vk_fence.c         | 76 +++++++++++++++++++++++++--
+ src/vulkan/runtime/vk_fence.h         |  9 ++++
+ 4 files changed, 154 insertions(+), 5 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_query_pool.cc b/src/freedreno/vulkan/tu_query_pool.cc
+index bf4c5e6..6d3ea7d 100644
+--- a/src/freedreno/vulkan/tu_query_pool.cc
++++ b/src/freedreno/vulkan/tu_query_pool.cc
+@@ -345,6 +345,8 @@ tu_CreateQueryPool(VkDevice _device,
+       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+ 
+    pool->perf_query_type = perf_query_type;
++   /* ETK t3devlost4: explicit init (belt-and-suspenders over zalloc). */
++   pool->etk_unavail_since_ns = 0;
+ 
+    if (is_perf_query_raw(pool)) {
+       struct tu_perf_query_raw *perf_query = &pool->perf_query.raw;
+@@ -577,6 +579,11 @@ emit_counter_barrier(struct tu_cs *cs)
+    }
+ }
+ 
++/* Consecutive full-timeout strike counter for the hangcheck-silent
++ * device-loss escalation below. File-scope: one tu_device per process
++ * in practice (fork-local pragmatism; reset on every available query). */
++static uint32_t etk_wait_timeout_strikes = 0;
++
+ /* Wait on the the availability status of a query up until a timeout. */
+ static VkResult
+ wait_for_available(struct tu_device *device, struct tu_query_pool *pool,
+@@ -588,9 +595,45 @@ wait_for_available(struct tu_device *device, struct tu_query_pool *pool,
+    struct query_slot *slot = slot_address(pool, query);
+    uint64_t abs_timeout = os_time_get_absolute_timeout(
+          WAIT_TIMEOUT * NSEC_PER_SEC);
+-   while(os_time_get_nano() < abs_timeout) {
+-      if (query_is_available(slot))
++   /* ETK Tier-3 (787B reframe, 2026-07-04): consult device status while
++    * waiting. After a kernel hangcheck recovery this query can never become
++    * available; the stock path returned VK_TIMEOUT (nonconformant for
++    * WAIT_BIT), which the app retries forever — the N=6 GT5P boss spin
++    * (get_query_pool_results wait-poll). Returning DEVICE_LOST breaks the
++    * loop at the source. 10 ms cadence keeps a healthy wait at <100
++    * ioctls/s.
++    */
++   uint64_t now;
++   uint64_t next_status_check =
++         os_time_get_nano() + 10 * 1000 * 1000; /* 10 ms */
++   while ((now = os_time_get_nano()) < abs_timeout) {
++      if (query_is_available(slot)) {
++         etk_wait_timeout_strikes = 0;
+          return VK_SUCCESS;
++      }
++      if (now >= next_status_check) {
++         VkResult device_status = vk_device_check_status(&device->vk);
++         if (device_status != VK_SUCCESS)
++            return device_status;
++         next_status_check = now + 10 * 1000 * 1000;
++      }
++   }
++   VkResult device_status = vk_device_check_status(&device->vk);
++   if (device_status != VK_SUCCESS)
++      return device_status;
++   /* ETK t3devlost2: kernel 7.0.11 does NOT advance MSM_PARAM_FAULTS for
++    * hangcheck-class recoveries (verified live on the HSL boss: this loop's
++    * 10 ms status checks ran for 90+ s against a flat counter while dmesg
++    * showed the fault). Only SUBMITTING paths learn of the loss (-EPIPE);
++    * a passive query poll can spin forever. Escalate: consecutive FULL
++    * timeout windows with the device supposedly healthy = dead hardware;
++    * declare the loss ourselves so the app can tear down. A legitimate
++    * query stall of 2x WAIT_TIMEOUT (10 s) does not exist in play. */
++   if (++etk_wait_timeout_strikes >= 2) {
++      return vk_device_set_lost(&device->vk,
++            "query unavailable through %u consecutive %us waits "
++            "(hangcheck-silent device loss)",
++            etk_wait_timeout_strikes, (unsigned) WAIT_TIMEOUT);
+    }
+    return vk_error(device, VK_TIMEOUT);
+ }
+@@ -659,6 +702,26 @@ get_query_pool_results(struct tu_device *device,
+       uint32_t result_count = get_result_count(pool);
+       uint32_t statistics = pool->vk.pipeline_statistics;
+ 
++      /* ETK t3devlost4b: per-object staleness, flag-agnostic. v4 gated the
++       * stamp behind !(flags & PARTIAL) — falsified live 2026-07-05: this
++       * build's ZCULL poke polls with PARTIAL|WITH_AVAILABILITY (x7=0xc,
++       * gdb register-proven), takes the partial path, gets SUCCESS-with-
++       * zeros, and spins forever with the stamp never written. Any
++       * unavailable observation ages the pool; any available one clears
++       * it — whatever the caller's flags. */
++      uint64_t etk_now_ns = os_time_get_nano();
++      if (available) {
++         pool->etk_unavail_since_ns = 0;
++      } else if (pool->etk_unavail_since_ns == 0) {
++         pool->etk_unavail_since_ns = etk_now_ns;
++      } else if (etk_now_ns - pool->etk_unavail_since_ns >
++                 30ull * 1000 * 1000 * 1000) {
++         return vk_device_set_lost(&device->vk,
++               "query pool stale: polled unavailable for >30s while "
++               "the device kept working (per-object staleness, "
++               "etk-t3devlost4)");
++      }
++
+       if ((flags & VK_QUERY_RESULT_WAIT_BIT) && !available) {
+          VkResult wait_result = wait_for_available(device, pool, query);
+          if (wait_result != VK_SUCCESS)
+diff --git a/src/freedreno/vulkan/tu_query_pool.h b/src/freedreno/vulkan/tu_query_pool.h
+index b642934..0e3e340 100644
+--- a/src/freedreno/vulkan/tu_query_pool.h
++++ b/src/freedreno/vulkan/tu_query_pool.h
+@@ -54,6 +54,13 @@ struct tu_query_pool
+    uint32_t query_stride;
+    struct tu_bo *bo;
+ 
++   /* ETK t3devlost4: per-object staleness stamp — os_time_get_nano() of the
++    * first unavailable-without-WAIT poll on this pool; 0 = not stale.
++    * Cleared whenever any query in the pool reads available. MUST stay
++    * above perf_query (flexible array members keep that union last).
++    * See get_query_pool_results. */
++   uint64_t etk_unavail_since_ns;
++
+    /* For performance query */
+    enum tu_perf_query_type perf_query_type;
+    union {
+diff --git a/src/vulkan/runtime/vk_fence.c b/src/vulkan/runtime/vk_fence.c
+index 8e43ea0..059528b 100644
+--- a/src/vulkan/runtime/vk_fence.c
++++ b/src/vulkan/runtime/vk_fence.c
+@@ -23,6 +23,14 @@
+ 
+ #include "vk_fence.h"
+ 
++#include "util/u_atomic.h"
++#include "util/os_time.h"
++
++/* ETK t3devlost3 dry-spell escalation state (see vk_common_GetFenceStatus).
++ * Process-global on purpose: ANY fence signaling proves the device lives. */
++static uint64_t etk_fence_last_signal_ns = 0;
++static uint32_t etk_fence_dry_polls = 0;
++
+ #include "util/os_time.h"
+ #include "util/perf/cpu_trace.h"
+ 
+@@ -218,6 +226,10 @@ vk_common_ResetFences(VkDevice _device,
+        */
+       vk_fence_reset_temporary(device, fence);
+ 
++      /* ETK t3devlost4: a reset fence starts a fresh life — clear the
++       * per-object staleness stamp or reused fences would inherit age. */
++      fence->etk_stale_since_ns = 0;
++
+       VkResult result = vk_sync_reset(device, &fence->permanent);
+       if (result != VK_SUCCESS)
+          return result;
+@@ -240,10 +252,68 @@ vk_common_GetFenceStatus(VkDevice _device,
+                                   0 /* wait_value */,
+                                   VK_SYNC_WAIT_COMPLETE,
+                                   0 /* abs_timeout_ns */);
+-   if (result == VK_TIMEOUT)
++   if (result == VK_SUCCESS) {
++      /* ETK t3devlost3: any signaled fence proves the GPU is alive — reset
++       * the dry-spell escalation below. Plain stores; races are harmless. */
++      etk_fence_last_signal_ns = os_time_get_nano();
++      etk_fence_dry_polls = 0;
++      /* ETK t3devlost4: this fence signaled — not an orphan. */
++      fence->etk_stale_since_ns = 0;
++   }
++   if (result == VK_TIMEOUT) {
++      /* ETK Tier-3 (787B reframe, 2026-07-04): a zero-timeout status poll
++       * never reaches the device-status consult that vk_common_WaitForFences
++       * performs, so a post-hangcheck device loss stays invisible to pollers
++       * — observed live: RPCS3's flip-path vkGetFenceStatus loop spinning
++       * >170 s on a faulted a6xx (00E51485). Mirror the WaitForFences
++       * pattern, rate-limited (1 ioctl per 64 not-ready polls) to keep the
++       * hot path cheap.
++       */
++      static uint32_t etk_poll_ctr = 0;
++      if ((p_atomic_inc_return(&etk_poll_ctr) & 0x3f) == 0) {
++         VkResult device_status = vk_device_check_status(device);
++         if (device_status != VK_SUCCESS)
++            return device_status;
++      }
++      /* ETK t3devlost3: MSM_PARAM_FAULTS is blind to hangcheck-class
++       * recoveries (kernel 7.0.11, proven live twice tonight), so the
++       * check above cannot see the boss when rsx parks HERE (flip-path
++       * fence poll — reproduced 2026-07-04 20:06 on GT HD, spinning
++       * forever with a flat counter). Escalate on evidence the check
++       * cannot give us: a poll storm with NO fence signaling anywhere
++       * for >10 s does not exist on a healthy device — during play,
++       * fences signal every frame. Declare the loss ourselves. */
++      etk_fence_dry_polls++;
++      if (etk_fence_last_signal_ns == 0) {
++         etk_fence_last_signal_ns = os_time_get_nano();
++      } else if (etk_fence_dry_polls > 1000 &&
++                 os_time_get_nano() - etk_fence_last_signal_ns >
++                       10ull * 1000 * 1000 * 1000) {
++         return vk_device_set_lost(device,
++               "fence polls dry for >10s with no fence signaling "
++               "(hangcheck-silent device loss)");
++      }
++      /* ETK t3devlost4: PER-OBJECT staleness — the global dry-spell above
++       * is structurally blind when the recovered GPU keeps signaling OTHER
++       * fences: proven live 2026-07-05 (retired-fence advanced 15 past the
++       * orphan while rsx spun 506+ s; every healthy neighbor reset the
++       * global clock). Track THIS fence instead: with the stamp cleared on
++       * every signal and reset, a fence continuously NOT_READY for >10 s
++       * does not exist on a healthy device.
++       */
++      uint64_t etk_now_ns = os_time_get_nano();
++      if (fence->etk_stale_since_ns == 0) {
++         fence->etk_stale_since_ns = etk_now_ns;
++      } else if (etk_now_ns - fence->etk_stale_since_ns >
++                 10ull * 1000 * 1000 * 1000) {
++         return vk_device_set_lost(device,
++               "fence stale: this fence polled NOT_READY for >10s while "
++               "the device kept working (per-object staleness, "
++               "etk-t3devlost4)");
++      }
+       return VK_NOT_READY;
+-   else
+-      return result;
++   }
++   return result;
+ }
+ 
+ VKAPI_ATTR VkResult VKAPI_CALL
+diff --git a/src/vulkan/runtime/vk_fence.h b/src/vulkan/runtime/vk_fence.h
+index 12cb1ab..5829f80 100644
+--- a/src/vulkan/runtime/vk_fence.h
++++ b/src/vulkan/runtime/vk_fence.h
+@@ -45,6 +45,15 @@ struct vk_fence {
+     */
+    struct vk_sync *temporary;
+ 
++   /* ETK t3devlost4: per-object staleness stamp — os_time_get_nano() of the
++    * first NOT_READY poll observed on THIS fence; 0 = not stale. Cleared on
++    * every observed signal and on reset, so per-frame fence reuse cannot
++    * age. A fence continuously NOT_READY for >10 s while the device keeps
++    * retiring other work is an orphan of a hangcheck recovery (proven live
++    * 2026-07-05). See vk_common_GetFenceStatus.
++    */
++   uint64_t etk_stale_since_ns;
++
+    /** Permanent fence state.
+     *
+     * Every fence has some form of permanent state.
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ETK Fork <etk@local>
 Date: Wed, 24 Jun 2026 14:05:10 +0000
-Subject: [PATCH 2/4] =?UTF-8?q?Patch=20#3=20B:=20ccuhalf/ccuquarter=20?=
+Subject: [PATCH 2/8] =?UTF-8?q?Patch=20#3=20B:=20ccuhalf/ccuquarter=20?=
  =?UTF-8?q?=E2=80=94=20cap=20a6xx=20depth=20CCU=20cache=20size=20(FULL->HA?=
  =?UTF-8?q?LF/QUARTER)=20at=20emit=5Frb=5Fccu=5Fcntl=20to=20attack=20the?=
  =?UTF-8?q?=20DEPTH=5FCACHE=3DFULL=20boss-resolve=20saturation.=20A6XX-onl?=
@@ -17,10 +17,10 @@ Content-Transfer-Encoding: 8bit
  3 files changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
-index 9faa309..2e02f6a 100644
+index dc55c01..491ca4b 100644
 --- a/src/freedreno/vulkan/tu_cmd_buffer.cc
 +++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
-@@ -648,7 +648,9 @@ emit_rb_ccu_cntl(struct tu_cs *cs, struct tu_device *dev, bool gmem)
+@@ -647,7 +647,9 @@ emit_rb_ccu_cntl(struct tu_cs *cs, struct tu_device *dev, bool gmem)
              dev->physical_device->info->props.concurrent_resolve,
           .depth_offset_hi = 0,
           .color_offset_hi = color_offset_hi,
@@ -32,7 +32,7 @@ index 9faa309..2e02f6a 100644
           .color_cache_size = color_cache_size,
           .color_offset = color_offset
 diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
-index 506fced..abe5d61 100644
+index 5632622..3f7e26d 100644
 --- a/src/freedreno/vulkan/tu_util.cc
 +++ b/src/freedreno/vulkan/tu_util.cc
 @@ -40,6 +40,8 @@ static const struct debug_control tu_debug_options[] = {

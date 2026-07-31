@@ -4,21 +4,36 @@ This is a **downstream fork of Mesa**. Mesa's own license terms govern this sour
 
 ## What governs
 
-- **Upstream license files are carried verbatim.** When you produce the fork branch from the
-  `mesa-26.1.3` tag (see [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh)), Mesa's
-  top-level license documentation comes with it — `docs/license.rst` and the `licenses/` directory.
+- **Upstream license files are carried verbatim.** When you produce the fork branch from the base
+  tag (see [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh)), Mesa's top-level
+  license documentation comes with it — `docs/license.rst` and the `licenses/` directory.
   Do not remove or alter them.
-- **Per-file SPDX headers govern each file.** Mesa is predominantly **MIT**-licensed, with some
-  components under other licenses. The files this fork modifies are all
-  `SPDX-License-Identifier: MIT` upstream:
-  - `src/freedreno/vulkan/tu_cmd_buffer.cc` — `© 2016 Red Hat / Bas Nieuwenhuizen`, MIT (confirmed)
-  - `src/freedreno/vulkan/tu_util.cc`, `tu_util.h` — MIT (confirmed)
+- **Per-file headers govern each file.** Mesa is predominantly **MIT**-licensed, with some
+  components under other licenses. Every file this fork modifies is MIT upstream (verified against
+  `mesa-26.1.6`):
 
-  This fork preserves those headers unchanged and adds no conflicting blanket claim.
+  | File | Copyright | How MIT is declared |
+  |------|-----------|---------------------|
+  | `src/freedreno/vulkan/tu_cmd_buffer.cc` | © 2016 Red Hat | `SPDX-License-Identifier: MIT` |
+  | `src/freedreno/vulkan/tu_device.cc` | © 2016 Red Hat | `SPDX-License-Identifier: MIT` |
+  | `src/freedreno/vulkan/tu_query_pool.cc` | © 2015 Intel | `SPDX-License-Identifier: MIT` |
+  | `src/freedreno/vulkan/tu_query_pool.h` | © 2016 Red Hat | `SPDX-License-Identifier: MIT` |
+  | `src/freedreno/vulkan/tu_util.cc` | © 2015 Intel | `SPDX-License-Identifier: MIT` |
+  | `src/freedreno/vulkan/tu_util.h` | 2020 Valve | `SPDX-License-Identifier: MIT` |
+  | `src/vulkan/runtime/vk_fence.c` | © 2021 Intel | full MIT text, **no SPDX tag** |
+  | `src/vulkan/runtime/vk_fence.h` | © 2021 Intel | full MIT text, **no SPDX tag** |
 
-> The fork delta touches only those three files (see `git log mesa-26.1.3..` on a branch built by
-> `scripts/prepare-fork-branch.sh`). If you extend it to other files, re-check their headers —
-> `grep -n SPDX-License-Identifier <file>` — and keep them intact.
+  This fork preserves those headers unchanged and adds no conflicting blanket claim. Note the last
+  two: they are MIT by full boilerplate rather than an SPDX identifier, so a `grep SPDX` sweep alone
+  will not find their license — check the header text.
+
+> That list is the complete fork delta (see `git log mesa-26.1.6..` on a branch built by
+> `scripts/prepare-fork-branch.sh`). If you extend it to other files, re-check their headers — both
+> `grep -n SPDX-License-Identifier <file>` *and* the comment block at the top — and keep them intact.
+
+**Backported upstream commits** under `patches/backports/` are unmodified Mesa commits carrying their
+original authorship and `Signed-off-by`/`Part-of` trailers; they are governed by the same upstream
+terms and are attributed to their authors in [`patches/README.md`](patches/README.md).
 
 ## The one real obligation
 

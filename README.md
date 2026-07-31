@@ -1,4 +1,4 @@
-# ETK Turnip — GTK fork (Mesa 26.1.3, Adreno 650 / SM8250)
+# ETK Turnip — GTK fork (Mesa 26.1.6, Adreno 650 / SM8250)
 
 A small, validated downstream patch set on top of [Mesa](https://gitlab.freedesktop.org/mesa/mesa)
 Turnip (the open-source Vulkan driver for Qualcomm Adreno GPUs), built for **glibc/ROCKNIX**
@@ -14,14 +14,24 @@ checkout using the steps in [`BUILDING.md`](BUILDING.md).
 ## Lineage (downstream fork)
 
 > **Downstream fork of Mesa.**
-> Base: tag **`mesa-26.1.3`** (freedesktop GitLab — `gitlab.freedesktop.org/mesa/mesa`).
+> Base: tag **`mesa-26.1.6`** (freedesktop GitLab — `gitlab.freedesktop.org/mesa/mesa`),
+> rebased from `mesa-26.1.3` on 2026-07-30.
 > Upstream is the canonical source; this is a downstream patch series carried on top of that tag.
 > Target backend: `freedreno` / `msm` (Linux KMS), glibc ABI — **not** the Android `bionic`/KGSL build.
 
 This is **not** a GitHub fork-network fork. Mesa's canonical home is freedesktop GitLab, not
 GitHub, so the GitHub "Fork" relationship is not available. This is a standalone repository that
-declares its lineage here and carries its changes as discrete commits over the `mesa-26.1.3` tag,
-so `git log mesa-26.1.3..` shows exactly the delta. See [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh).
+declares its lineage here and carries its changes as discrete commits over the base tag,
+so `git log mesa-26.1.6..` shows exactly the delta. See [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh).
+
+The series is base-agnostic and verified to apply with zero fuzz to `mesa-26.1.3`, `mesa-26.1.6` and
+`mesa-26.2.0-rc3`, so the same patches build a **stable** or a **pre-release** driver — which is what
+lets the ETK Pitstop DRIVER tab A/B one against the other:
+
+```bash
+./scripts/prepare-fork-branch.sh apply                                   # stable  (mesa-26.1.6)
+BASE_TAG=mesa-26.2.0-rc3 FORK_BRANCH=etk-gtk-26.2 ./scripts/prepare-fork-branch.sh apply
+```
 
 ---
 
@@ -43,6 +53,14 @@ They are `TU_DEBUG`-gated and **default-off** — selecting one is a deliberate 
 - Several alternative-mechanism gears (cache-sizing, sysmem routing) were tried and **falsified** —
   the decision log is preserved in [`PATCHES.md`](PATCHES.md) and [`GEARS.md`](GEARS.md) precisely so
   the negative results aren't re-walked.
+
+Since the 26.1.6 rebase the fork also carries a **`zlatez`** gear on a different axis. Every gear
+above is a *resolve* mechanism, and every alternative one falsified; `zlatez` is the first that
+isn't. Mesa 26.2 added an a6xx workaround whose in-tree comment reads *"A630/A650 hangs with this
+combination of states"* — `EARLY_Z_LATE_Z` + a depth/stencil format + a killing fragment shader.
+That names this GPU and is a **fragment-stage** wedge, matching the decoded root cause. It is gated
+to D32S8 upstream and the ETK target is Z24S8, so `zlatez` widens that gate. It is **built and
+unvalidated** — the open experiment, with a `dimlog` probe to falsify it cheaply first.
 
 See [`GEARS.md`](GEARS.md) for the full flag semantics and [`VALIDATION.md`](VALIDATION.md) for the
 A/B protocol.
@@ -66,7 +84,8 @@ of the fork's lighter gears beat `syncdraw` on stability. The full fault decode 
 | [`PATCHES.md`](PATCHES.md) | The patch iterations with A/B verdicts (what was kept, what was falsified, and why) |
 | [`VALIDATION.md`](VALIDATION.md) | Reproducible test protocol (saturated-vault A/B, cold-boot gate, jitter metric) |
 | [`LICENSE.md`](LICENSE.md) | Licensing & attribution — upstream license files and per-file headers govern |
-| [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh) | Produce a clean `mesa-26.1.3`-based branch with the fork patches on top |
+| [`patches/README.md`](patches/README.md) | Patch-series layout: base-agnostic fork series vs. per-line upstream backports |
+| [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh) | Produce a clean branch on any upstream ref (release tag, rc, branch, `main`) with the backports + fork patches on top |
 
 ---
 

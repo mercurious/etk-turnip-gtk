@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ETK Fork <etk@local>
 Date: Wed, 24 Jun 2026 15:56:16 +0000
-Subject: [PATCH 4/4] =?UTF-8?q?Refined=20A:=20dsany=20=E2=80=94=20route=20?=
+Subject: [PATCH 4/8] =?UTF-8?q?Refined=20A:=20dsany=20=E2=80=94=20route=20?=
  =?UTF-8?q?ANY=20depth-attachment=20renderpass=20to=20sysmem=20(drops=20ds?=
  =?UTF-8?q?bypass=20store=3Dtrue=20req=20that=20missed=20the=20boss=20alig?=
  =?UTF-8?q?nment-driven=20resolve).=20Conclusive=20avoid-GMEM-resolve=20te?=
@@ -17,10 +17,10 @@ Content-Transfer-Encoding: 8bit
  3 files changed, 24 insertions(+), 1 deletion(-)
 
 diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
-index 7ded4ed..c3f525b 100644
+index 650e9de..a91ae08 100644
 --- a/src/freedreno/vulkan/tu_cmd_buffer.cc
 +++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
-@@ -1376,6 +1376,24 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
+@@ -1375,6 +1375,24 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
        }
     }
  
@@ -46,7 +46,7 @@ index 7ded4ed..c3f525b 100644
     if (!cmd->state.tiling->possible) {
        cmd->state.rp.gmem_disable_reason = "Can't fit attachments into gmem";
 diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
-index 6084bcc..a6999c2 100644
+index 0fa2272..b4d9d60 100644
 --- a/src/freedreno/vulkan/tu_util.cc
 +++ b/src/freedreno/vulkan/tu_util.cc
 @@ -43,6 +43,7 @@ static const struct debug_control tu_debug_options[] = {

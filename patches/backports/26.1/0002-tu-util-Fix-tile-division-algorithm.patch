@@ -1,0 +1,82 @@
+From 5000d6644db4f3f1893cd69e46f204eb5e6fc6e1 Mon Sep 17 00:00:00 2001
+From: Dhruv Mark Collins <mark@igalia.com>
+Date: Tue, 9 Jun 2026 21:11:23 +0000
+Subject: [PATCH] tu/util: Fix tile division algorithm
+
+The tile division algorithm was using the previous level as the
+base to divide from, this would result in the divisor effectively
+growing factorially (i.e. level 3 would be more like 1+2+3=level 6)
+rather than linearly which meant that lost a lot of granularity in
+the exact tiling level we chose.
+
+This had a negative consequence of us needing to tile too much in
+some cases because the granular lower level wouldn't exist, as well
+as causing the maximum tile division level to undershoot because
+the growth factor being so great would result in hitting the path
+of reverting to the previous level much earlier than if we go linearly.
+
+Additionally, since the divisor is persisted per render pass across
+framebuffers while a freshly created framebuffer's initialized level
+always resets back to one, a single call could jump the divisor by
+more than one level at once.
+
+The previous implementation would only initialize the requested level
+and recursively fall back a level at a time on rejection, so it could
+mark every intermediate level as initialized without ever actually
+computing them, leaving their tiling configs full of uninitialized
+data if one of those levels was ever queried directly afterwards.
+
+This is fixed by initializing every level between the previous divisor
+and the requested one in order instead.
+
+Signed-off-by: Dhruv Mark Collins <mark@igalia.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/42553>
+---
+ src/freedreno/vulkan/tu_util.cc | 19 +++++++++++--------
+ 1 file changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
+index 598c3dc78164..cfc03d6eacd1 100644
+--- a/src/freedreno/vulkan/tu_util.cc
++++ b/src/freedreno/vulkan/tu_util.cc
+@@ -555,12 +555,14 @@ tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
+    assert(divisor >= 1 && divisor <= TU_GMEM_LAYOUT_DIVISOR_MAX);
+    assert(divisor == 1 || !pass->has_fdm); /* For FDM, it's expected that FDM alone will be sufficient to
+                                               appropriately size the tiles for the framebuffer.*/
+-   struct tu_tiling_config *tiling = &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
+ 
+-   if (divisor > fb->initd_divisor) {
+-      const struct tu_tiling_config *base_tiling =
+-         tu_framebuffer_get_tiling_config(fb, device, pass, gmem_layout, divisor - 1);
+-      tu_tiling_config_divide_tile(device, pass, fb, base_tiling, tiling, divisor);
++   /* Initialize every level between what's already been done and the requested divisor, in
++    * order, so a jump of more than one level never leaves an intermediate slot uninitialized.
++    */
++   for (uint32_t d = fb->initd_divisor + 1; d <= divisor; d++) {
++      struct tu_tiling_config *tiling = &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (d - 1)) + gmem_layout];
++      const struct tu_tiling_config *base_tiling = &fb->tiling[gmem_layout];
++      tu_tiling_config_divide_tile(device, pass, fb, base_tiling, tiling, d);
+ 
+       struct tu_vsc_config *vsc = &tiling->vsc;
+       if (tiling->possible) {
+@@ -577,13 +579,14 @@ tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
+           (vsc->tile_count.width * vsc->tile_count.height > 100) /* 100 tiles are too many, even with HW binning.   */
+       ) {
+          /* Revert to the previous level's tiling configuration. */
+-         *tiling = *base_tiling;
++         const struct tu_tiling_config *prev_tiling = &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (d - 2)) + gmem_layout];
++         *tiling = *prev_tiling;
+       }
+ 
+-      fb->initd_divisor = divisor;
++      fb->initd_divisor = d;
+    }
+ 
+-   return tiling;
++   return &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
+ }
+ 
+ void
+-- 
+GitLab
+

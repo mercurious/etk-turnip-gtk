@@ -1,5 +1,45 @@
---- a/src/freedreno/vulkan/tu_query_pool.cc	2026-07-05 18:25:45
-+++ b/src/freedreno/vulkan/tu_query_pool.cc	2026-07-05 18:27:04
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mercurious <dutch.money@gmail.com>
+Date: Thu, 30 Jul 2026 19:43:13 -0400
+Subject: [PATCH 6/8] KGSL-parity query-survive: forge zero instead of
+ device-lost
+
+Builds on the t3devlost per-object staleness detection. Where that patch
+answers VK_ERROR_DEVICE_LOST so the app tears down cleanly (~1s stop),
+this one is parity: when the paired ROCKNIX-GTK kernel keeps the hung
+context alive (msm.context_keepalive=1, which neither bans the VM nor
+bumps the fault counter), the dropped query can instead be forged --
+reported AVAILABLE with value 0, one wrong fully-occluded frame -- so the
+app's poll unparks and the race CONTINUES, matching how Android/KGSL
+absorbs the same hang.
+
+Gated by TU_ETK_QUERY_SURVIVE, DEFAULT ON, with TU_ETK_QUERY_SURVIVE=0 as
+the kill-switch. Both dropped-query verdicts in get_query_pool_results --
+the wait_for_available WAIT_BIT strike path and the PARTIAL/ZCULL-poke
+staleness path -- get a survive branch that forges an available zero result
+(WITH_AVAILABILITY still reports 1/done). ETK_SURVIVE_UNAVAIL_NS = 1.5s
+doubles as the "submit was dropped" signal and bounds the stutter. Never
+marks the device lost, so submits keep flowing.
+
+Requires the parity kernel: without msm.context_keepalive the forged query
+is followed by -EPIPE on the next submit. This is one half of a
+kernel+driver pair, not standalone.
+
+The default was originally off, on the reasoning that a new mechanism should
+be opt-in. That was wrong as a record: the certified gtk_0.4 driver shipped
+with it flipped ON, but the flip lived only as an uncommitted edit in the
+build tree, so this published series did NOT reproduce the shipped driver --
+a rebuild from these patches silently lost the survive net, which is exactly
+what happened to gtk_0.5. Default-on makes the series honest about what the
+proven build does; TU_ETK_QUERY_SURVIVE=0 recovers the old behaviour for A/B.
+---
+ src/freedreno/vulkan/tu_query_pool.cc | 78 +++++++++++++++++++++++++--
+ 1 file changed, 73 insertions(+), 5 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_query_pool.cc b/src/freedreno/vulkan/tu_query_pool.cc
+index 6d3ea7d..c54f80f 100644
+--- a/src/freedreno/vulkan/tu_query_pool.cc
++++ b/src/freedreno/vulkan/tu_query_pool.cc
 @@ -12,6 +12,7 @@
  
  #include "nir/nir_builder.h"
@@ -8,7 +48,7 @@
  #include "vk_acceleration_structure.h"
  #include "vk_util.h"
  
-@@ -584,17 +585,47 @@
+@@ -584,17 +585,48 @@ emit_counter_barrier(struct tu_cs *cs)
   * in practice (fork-local pragmatism; reset on every available query). */
  static uint32_t etk_wait_timeout_strikes = 0;
  
@@ -21,15 +61,16 @@
 + * declaring the device lost — a clean tear-down (the crash-net). Survive mode
 + * instead forges an available, zero-valued result so the app's rsx poll
 + * unparks and the race CONTINUES — one wrong (fully-occluded) frame instead of
-+ * a lost device, matching how Android/KGSL absorbs this same hang. Default off
-+ * = the stock crash-net, so this build is behaviour-identical until the flag is
-+ * set (mirrors the kernel param's default-off design). */
++ * a lost device, matching how Android/KGSL absorbs this same hang. DEFAULT ON:
++ * this is what the certified gtk_0.4 driver actually shipped, and a build from
++ * the published patch series has to reproduce that. TU_ETK_QUERY_SURVIVE=0 is
++ * the kill-switch back to the stock crash-net (t3devlost device-lost) for A/B. */
 +static bool
 +etk_query_survive(void)
 +{
 +   static int cached = -1;
 +   if (cached < 0)
-+      cached = debug_get_bool_option("TU_ETK_QUERY_SURVIVE", false);
++      cached = debug_get_bool_option("TU_ETK_QUERY_SURVIVE", true);
 +   return cached;
 +}
 +
@@ -59,7 +100,7 @@
     /* ETK Tier-3 (787B reframe, 2026-07-04): consult device status while
      * waiting. After a kernel hangcheck recovery this query can never become
      * available; the stock path returned VK_TIMEOUT (nonconformant for
-@@ -621,6 +652,15 @@
+@@ -621,6 +653,15 @@ wait_for_available(struct tu_device *device, struct tu_query_pool *pool,
     VkResult device_status = vk_device_check_status(&device->vk);
     if (device_status != VK_SUCCESS)
        return device_status;
@@ -75,7 +116,7 @@
     /* ETK t3devlost2: kernel 7.0.11 does NOT advance MSM_PARAM_FAULTS for
      * hangcheck-class recoveries (verified live on the HSL boss: this loop's
      * 10 ms status checks ran for 90+ s against a flat counter while dmesg
-@@ -701,6 +741,9 @@
+@@ -701,6 +742,9 @@ get_query_pool_results(struct tu_device *device,
        bool available = query_is_available(slot);
        uint32_t result_count = get_result_count(pool);
        uint32_t statistics = pool->vk.pipeline_statistics;
@@ -85,7 +126,7 @@
  
        /* ETK t3devlost4b: per-object staleness, flag-agnostic. v4 gated the
         * stamp behind !(flags & PARTIAL) — falsified live 2026-07-05: this
-@@ -714,6 +757,16 @@
+@@ -714,6 +758,16 @@ get_query_pool_results(struct tu_device *device,
           pool->etk_unavail_since_ns = 0;
        } else if (pool->etk_unavail_since_ns == 0) {
           pool->etk_unavail_since_ns = etk_now_ns;
@@ -102,7 +143,7 @@
        } else if (etk_now_ns - pool->etk_unavail_since_ns >
                   30ull * 1000 * 1000 * 1000) {
           return vk_device_set_lost(&device->vk,
-@@ -723,10 +776,13 @@
+@@ -723,10 +777,13 @@ get_query_pool_results(struct tu_device *device,
        }
  
        if ((flags & VK_QUERY_RESULT_WAIT_BIT) && !available) {
@@ -117,7 +158,7 @@
        } else if (!(flags & VK_QUERY_RESULT_PARTIAL_BIT) && !available) {
           /* From the Vulkan 1.1.130 spec:
            *
-@@ -745,7 +801,18 @@
+@@ -745,7 +802,18 @@ get_query_pool_results(struct tu_device *device,
        }
  
        for (uint32_t k = 0; k < result_count; k++) {
@@ -137,3 +178,6 @@
              uint64_t *result;
  
              if (pool->vk.query_type == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
+-- 
+2.50.1 (Apple Git-155)
+

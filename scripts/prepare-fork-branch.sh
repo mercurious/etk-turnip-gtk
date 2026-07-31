@@ -2,10 +2,25 @@
 #
 # prepare-fork-branch.sh
 #
-# Produce a clean, auditable fork branch: a fresh checkout of upstream Mesa at the
-# `mesa-26.1.3` tag with the ETK GTK patch series applied as discrete commits on top.
-# The result is a tree where `git log mesa-26.1.3..` shows exactly the fork delta, and
+# Produce a clean, auditable fork branch: a fresh checkout of upstream Mesa at some
+# base ref with the ETK GTK patch series applied as discrete commits on top. The
+# result is a tree where `git log <base>..` shows exactly the fork delta, and
 # upstream's license files and per-file SPDX headers are carried verbatim.
+#
+# The base ref is anything git can clone --branch: a release tag (mesa-26.1.6), a
+# release-candidate tag (mesa-26.2.0-rc3), a stable branch (26.2), or main. That is
+# what lets ETK Pitstop hold stable and pre-release drivers side by side.
+#
+# Two kinds of patch live under ./patches/:
+#
+#   patches/*.patch              the fork series — base-agnostic. Verified to apply
+#                                cleanly to 26.1.3, 26.1.6 and 26.2.0-rc3 with zero
+#                                fuzz, so it is deliberately NOT duplicated per base;
+#                                split it only when it actually has to diverge.
+#   patches/backports/<line>/    upstream commits pulled back to an older base.
+#                                Base-specific by nature: 26.1/ carries two turnip
+#                                commits that 26.2 already contains natively, so
+#                                26.2/ is empty and that is the correct state.
 #
 # Why a script and not a GitHub fork: Mesa's canonical home is freedesktop GitLab, not
 # GitHub, so there is no GitHub fork-network relationship to inherit. We rebuild the
@@ -32,10 +47,25 @@ set -euo pipefail
 
 # ---- Config (override via environment) --------------------------------------
 UPSTREAM_URL="${UPSTREAM_URL:-https://gitlab.freedesktop.org/mesa/mesa.git}"
-BASE_TAG="${BASE_TAG:-mesa-26.1.3}"
+BASE_TAG="${BASE_TAG:-mesa-26.1.6}"
 FORK_BRANCH="${FORK_BRANCH:-etk-gtk}"
+WORKDIR_EXPLICIT="${WORKDIR:+1}"
 WORKDIR="${WORKDIR:-$(pwd)/mesa-fork-${BASE_TAG}}"
 PATCH_DIR="${PATCH_DIR:-$(cd "$(dirname "$0")/.." && pwd)/patches}"
+
+# Release line derived from the base ref, used to pick the backport set:
+#   mesa-26.1.6 -> 26.1   mesa-26.2.0-rc3 -> 26.2   26.2 -> 26.2   main -> main
+BASE_LINE="${BASE_LINE:-$(printf '%s' "${BASE_TAG}" | sed -E 's/^mesa-//; s/^([0-9]+\.[0-9]+).*/\1/')}"
+BACKPORT_DIR="${BACKPORT_DIR:-${PATCH_DIR}/backports/${BASE_LINE}}"
+
+# Moving refs (branches like 26.2 or main) are meant to be re-pulled. Set REUSE=1 to
+# fetch+reset an existing WORKDIR in place instead of refusing to touch it.
+REUSE="${REUSE:-0}"
+
+# `build` mode overlays a FULL source tree captured from the build container. That
+# tree is a snapshot of one specific upstream base, so overlaying it onto any other
+# base would silently revert every upstream change in between. Pinned separately.
+BUILD_BASE_TAG="${BUILD_BASE_TAG:-mesa-26.1.3}"
 
 # `build` mode: where the fork tree lives and the commit range to capture.
 FORK_TREE="${FORK_TREE:-}"                  # e.g. /work/mesa-26.1.3
@@ -58,14 +88,23 @@ usage() {
 Usage: $0 <build|apply>
 
   build   Author the patch series. Requires the fork tree (container or host) AND network.
+          Pinned to BUILD_BASE_TAG=${BUILD_BASE_TAG} (see note in the header).
           In-container:  FORK_DOCKER=turnip-rocknix FORK_TREE=/work/mesa-26.1.3 $0 build
           On host:       FORK_TREE=/path/to/mesa-26.1.3 $0 build
 
   apply   Reproduce the fork checkout from committed ./patches/ onto a fresh upstream
           ${BASE_TAG} clone. Needs only network.
 
-Overrides: UPSTREAM_URL BASE_TAG FORK_BRANCH WORKDIR PATCH_DIR
-           FORK_TREE FORK_DOCKER FORK_BASE FORK_HEAD IMPORT_MSG
+          Stable:      $0 apply
+          Pre-release: BASE_TAG=mesa-26.2.0-rc3 FORK_BRANCH=etk-gtk-26.2 $0 apply
+          Branch tip:  BASE_TAG=26.2 REUSE=1 $0 apply
+
+Current base : ${BASE_TAG}  (line ${BASE_LINE})
+Backports    : ${BACKPORT_DIR}
+Fork series  : ${PATCH_DIR}
+
+Overrides: UPSTREAM_URL BASE_TAG BASE_LINE BACKPORT_DIR FORK_BRANCH WORKDIR PATCH_DIR
+           REUSE BUILD_BASE_TAG FORK_TREE FORK_DOCKER FORK_BASE FORK_HEAD IMPORT_MSG
 EOF
 }
 
@@ -106,10 +145,42 @@ preflight_fork() {
 }
 
 clone_upstream() {
-  [[ -e "${WORKDIR}" ]] && { echo "ERROR: ${WORKDIR} exists; remove it or set WORKDIR." >&2; exit 1; }
-  echo ">> Cloning ${UPSTREAM_URL} @ ${BASE_TAG} (shallow) -> ${WORKDIR}"
-  git clone --depth 1 --branch "${BASE_TAG}" "${UPSTREAM_URL}" "${WORKDIR}"
+  if [[ -e "${WORKDIR}" ]]; then
+    if [[ "${REUSE}" != "1" ]]; then
+      echo "ERROR: ${WORKDIR} exists; remove it, set WORKDIR, or pass REUSE=1 to re-pull." >&2
+      exit 1
+    fi
+    echo ">> Re-pulling ${BASE_TAG} into existing ${WORKDIR} (REUSE=1)"
+    git -C "${WORKDIR}" fetch --depth 1 origin "${BASE_TAG}"
+    # Drop any previous run's fork branch so the series never applies twice.
+    git -C "${WORKDIR}" checkout -q --detach FETCH_HEAD
+    git -C "${WORKDIR}" branch -D "${FORK_BRANCH}" 2>/dev/null || true
+    git -C "${WORKDIR}" reset -q --hard FETCH_HEAD
+    # Preserve meson/ninja build trees: they are untracked, so a bare
+    # `clean -fdx` deletes them and turns every re-pull into a full rebuild
+    # (~700 objects). Everything else untracked still goes.
+    git -C "${WORKDIR}" clean -qfdx -e 'build*'
+  else
+    echo ">> Cloning ${UPSTREAM_URL} @ ${BASE_TAG} (shallow) -> ${WORKDIR}"
+    git clone --depth 1 --branch "${BASE_TAG}" "${UPSTREAM_URL}" "${WORKDIR}"
+  fi
+  # Record the base commit by sha: a branch base (26.2, main) has no local ref to
+  # diff against after we branch off it, so `${BASE_TAG}..` would not resolve.
+  BASE_SHA="$(git -C "${WORKDIR}" rev-parse HEAD)"
   git -C "${WORKDIR}" checkout -b "${FORK_BRANCH}" >/dev/null
+}
+
+# Apply the base-specific upstream backports, if this line has any. Newer bases that
+# already contain the commits natively have an empty dir -- that is expected, not an
+# error, so an absent/empty backport set is silently a no-op.
+apply_backports() {
+  if ! ls "${BACKPORT_DIR}"/*.patch >/dev/null 2>&1; then
+    echo ">> No backports for line ${BASE_LINE} (${BACKPORT_DIR}) — base carries them natively"
+    return 0
+  fi
+  echo ">> Applying upstream backports for line ${BASE_LINE}"
+  git -C "${WORKDIR}" am --keep-non-patch "${BACKPORT_DIR}"/*.patch
+  ls -1 "${BACKPORT_DIR}"/*.patch | sed 's#.*/#     - #'
 }
 
 build_series() {
@@ -172,14 +243,17 @@ build_series() {
   fi
   rm -rf "${tmp}"
 
+  # Only the fork series is authored here. Upstream backports are curated artifacts
+  # downloaded from GitLab into patches/backports/<line>/, not regenerated from this
+  # tree -- and the `rm` glob is non-recursive on purpose so it leaves them alone.
   echo ">> Writing complete series to ${PATCH_DIR}"
   mkdir -p "${PATCH_DIR}"
   rm -f "${PATCH_DIR}"/*.patch 2>/dev/null || true
-  git -C "${WORKDIR}" format-patch --output-directory "${PATCH_DIR}" --zero-commit "${BASE_TAG}..${FORK_BRANCH}"
+  git -C "${WORKDIR}" format-patch --output-directory "${PATCH_DIR}" --zero-commit "${BASE_SHA}..${FORK_BRANCH}"
 
   echo
   echo ">> Done. Fork delta over ${BASE_TAG}:"
-  git -C "${WORKDIR}" --no-pager log --oneline "${BASE_TAG}..${FORK_BRANCH}"
+  git -C "${WORKDIR}" --no-pager log --oneline "${BASE_SHA}..${FORK_BRANCH}"
   echo
   echo "   Patches written: $(ls -1 "${PATCH_DIR}"/*.patch | wc -l | tr -d ' ')  (commit ./patches/ to this repo)"
   echo "   Built checkout : ${WORKDIR}  (build per BUILDING.md)"
@@ -188,16 +262,28 @@ build_series() {
 apply_series() {
   ls "${PATCH_DIR}"/*.patch >/dev/null 2>&1 || { echo "ERROR: no patches in ${PATCH_DIR}; run '$0 build' first." >&2; exit 1; }
   clone_upstream
-  echo ">> Applying committed series from ${PATCH_DIR}"
+  apply_backports
+  echo ">> Applying committed fork series from ${PATCH_DIR}"
   git -C "${WORKDIR}" am --keep-non-patch "${PATCH_DIR}"/*.patch
   echo
-  echo ">> Done. Fork delta over ${BASE_TAG}:"
-  git -C "${WORKDIR}" --no-pager log --oneline "${BASE_TAG}..${FORK_BRANCH}"
+  echo ">> Done. Delta over ${BASE_TAG} (${BASE_SHA:0:10}):"
+  git -C "${WORKDIR}" --no-pager log --oneline "${BASE_SHA}..${FORK_BRANCH}"
+  echo
   echo "   Built checkout: ${WORKDIR}  (build per BUILDING.md)"
 }
 
 case "${1:-}" in
-  build) build_series ;;
+  build)
+    # The overlay is a FULL source tree snapshotted at BUILD_BASE_TAG. Overlaying it
+    # onto any newer base would revert every upstream change in between, silently and
+    # invisibly (git archive can express additions, not the deletions that implies).
+    # So build mode is pinned to the tree's own base regardless of BASE_TAG.
+    if [[ "${BASE_TAG}" != "${BUILD_BASE_TAG}" ]]; then
+      echo ">> build mode: pinning BASE_TAG ${BASE_TAG} -> ${BUILD_BASE_TAG} (overlay tree's own base)"
+      BASE_TAG="${BUILD_BASE_TAG}"
+      [[ -n "${WORKDIR_EXPLICIT}" ]] || WORKDIR="$(pwd)/mesa-fork-${BASE_TAG}"
+    fi
+    build_series ;;
   apply) apply_series ;;
   *)     usage; exit 1 ;;
 esac
