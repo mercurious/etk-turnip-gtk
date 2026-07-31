@@ -38,8 +38,19 @@ so the format gate is the only thing keeping that workaround off it.
 
 | Flag | Effect | Notes | Status |
 |------|--------|-------|--------|
-| `zlatez` | Extends the upstream workaround to `D24_UNORM_S8_UINT` | **The confirmed format** — use this one | Built; **A/B pending** |
+| `zlatez` | Extends the upstream workaround to `D24_UNORM_S8_UINT` | **The confirmed format** — use this one | **First positive result** (see below) |
 | `zlatezany` | Drops the format gate entirely — any depth format | Not needed: the probe identified the format | Built; superseded by `zlatez` |
+
+**A/B result (2026-07-30, `gtk_0.6`, GT5P one-lap HSL, N=3 per arm):** gear **off** → 3/3 wedged
+(`00E59005`), 5 rescues. Gear **on** → 3/3 completed the race, saved and exited cleanly, 0 rescues,
+PERFECT% 2.4 → 7.1. This is the first fork gear to beat its own control on this fault.
+
+Caveats that keep it provisional: N=3, and **one lap** — the documented boss is HSL-reverse at
+~lap 4–5, so this does not yet separate *eliminated* from *delayed*. Multi-lap is the next test.
+
+> Reading the ledger: a completed session is race + save + graceful exit, a crashed one just stops,
+> so **a winning arm can show shorter durations than a losing one**. Compare `status` and `rescues`
+> before duration.
 
 **Run the probe before the gear.** With `TU_DEBUG=dimlog` and *no* z-gear set, the driver logs once:
 

@@ -154,7 +154,45 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   one-shot probe that fires **with no gear set**, reporting the first time the hazard state is
   reached and in which format. Run the probe first: if the line never appears, the hypothesis is
   falsified for the cost of one session instead of an N≥3 A/B.
-- **Verdict:** **PROBE POSITIVE (2026-07-30, first track run) — the hypothesis survived its
+- **Verdict:** **FIRST POSITIVE RESULT ON THIS FAULT (2026-07-30).** Matched A/B on `gtk_0.6`,
+  GT5P BCUS98158, Class B one-lap High Speed Loop (Integra), res 100, race power, warm, N=3 per arm:
+
+  | | `zlatez` OFF | `zlatez` ON |
+  |---|---|---|
+  | Outcome | **3/3 `SURVIVED:Adreno`** (`00E59005`) | **3/3 `CLEAN` — race completed, saved, graceful exit** |
+  | Rescues | 2, 1, 2 (**5**) | **0, 0, 0** |
+  | PERFECT% | 2.4 | **7.1** |
+  | LOCK% | 35.5 | 37.9 |
+  | Duration | 236, 227, 216 s | 221, 207, 227 s |
+
+  Read the durations carefully: the ON runs are *shorter* and that is the win, not a regression. A
+  completed session is race + save + graceful exit; a crashed one just stops. The ON arm did
+  strictly more work than the OFF arm managed, so the result is not censored by a fixed stop.
+
+  The **rescue count is the strongest column**: crash/no-crash is one endpoint per run, but rescues
+  are events *inside* a run, and they went 5 → 0. That is independent of when a session ended.
+
+  The OFF crashes cluster at 216/227/236 s — a 20 s spread for a fault documented at 77–2886 s.
+  That tightness says the wedge is triggered at a specific point in the scene rather than randomly,
+  which is why N=3 carries more weight here than the raw noise floor implies.
+
+  **What this does not yet establish:**
+  - N=3 per arm (Fisher exact on 3/3 vs 0/3 ≈ p 0.05 — the edge, not the far side of it).
+  - **One lap.** The documented reference boss is HSL-*reverse* at ~lap 4–5, a longer workload than
+    this. Passing one lap does not show the wedge is eliminated rather than delayed.
+  - `gtk_0.5` + `zlatez` crashed 2/3 while `gtk_0.6` + `zlatez` crashed 0/3, with only the
+    query-survive default between them — a default on the *query* path, while these faults are all
+    fence-path `00E59005`. Most likely N=3 noise, but it is unexplained, so pooled across both
+    drivers the gear is 2/6 rather than 0/3.
+
+  Next: multi-lap on `gtk_0.6` with the gear on, N≥3. If it holds past the lap-4/5 boss, the result
+  is conclusive and directly reportable upstream as a widening of `a70d2af590db`.
+
+- **Separate finding — a 26.1.6 base regression, not the gear.** Frametime jitter is elevated on
+  every 26.1.6 row (`6.5–9.9 ms`) versus every 26.1.3-era row (`3.4–6.0 ms`), and it persists with
+  `zlatez` **off**, so it belongs to the base bump. Unexplained; worth isolating on its own.
+
+- **Probe (2026-07-30, the run that justified the A/B) — the hypothesis survived its
   falsification test.** `gtk_0.5` on the rig, `TU_DEBUG=dimlog`, no z-gear, GT5P (BCUS98158,
   US disc), 440 s to a wedge. The probe fired exactly once, as designed:
 

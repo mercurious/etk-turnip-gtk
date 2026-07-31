@@ -37,6 +37,19 @@ first time the hazard state is entered. If that line never appears on the refere
 z-gears are inert and the hypothesis is dead without a single A/B run. If it does appear, the
 reported `depth_format=` tells you which gear to reach for. See [`GEARS.md`](GEARS.md).
 
+## Duration is not comparable across outcomes
+
+If the protocol is *run a fixed race, then save and exit gracefully* (which is what makes a ledger
+row), a **completed** session's duration covers race + save + exit, while a **crashed** one simply
+stops when the GPU wedges. A winning arm can therefore post **shorter** durations than the arm it
+beat — as `zlatez` did on 2026-07-30 (ON: 221/207/227 s all completed; OFF: 236/227/216 s all
+wedged). Read `status` and `rescues` first; use duration only within a single outcome class, or on
+an open-ended run where nothing stops the session but the fault.
+
+`rescues` is usually the most informative column in a matched A/B: crash/no-crash is one endpoint
+per session, but rescues are events *inside* the run, so they carry signal even when every session
+is the same fixed length.
+
 ## Signal, not crash-rate
 
 Measure **duration and time-to-crash ceiling**, not a binary "clean/crashed" rate — the latter is
