@@ -19,9 +19,16 @@ across repeated runs, with the mechanism confirmed from the logs.
    this way.
 5. **Rule out our own code first.** Before blaming hardware (cable/card/thermals), confirm the fault
    reproduces independent of the gear and the bind.
-6. **Attribute every run to a build.** `vulkaninfo | grep driverInfo` must report
-   `Mesa <ver> (git-<sha>) ETK-GTK` before recording anything. With several drivers selectable in
-   Pitstop, an unattributable result is not a result. See [`BUILDING.md`](BUILDING.md).
+6. **Attribute every run to a whole stack, not just a driver.** ETK moves ROCKNIX, the kernel,
+   Turnip and RPCS3 independently, and an arm that spans *any* of those bumps is not one arm. Each
+   ledger row's `tune_tag` now carries `build=<turnip>;stack=rk<img>/k<kernel>/r<rpcs3>`, and
+   `etk_dyno` prints a STACKS legend that warns when more than one appears in a comparison. **If
+   that warning fires, the table below it is not a measurement.**
+
+   This is not theoretical. On 2026-07-30/31 a zlatez A/B was pooled across an RPCS3 base bump that
+   landed mid-campaign; the ON arm's apparent decay was the stack changing, not the gear weakening.
+   Two published conclusions had to be withdrawn. Freeze the stack for the duration of a campaign,
+   or accept that the campaign only measures the block that shares one.
 7. **Re-baseline after a base bump.** Verdicts are only comparable within one upstream base. The
    26.1.3 → 26.1.6 bump moved the flush baseline (`blit_cache_cleaned` — see
    [`PATCHES.md`](PATCHES.md)) and the tile-division backport moved the tiling baseline. Re-run the

@@ -41,12 +41,20 @@ so the format gate is the only thing keeping that workaround off it.
 | `zlatez` | Extends the upstream workaround to `D24_UNORM_S8_UINT` | **The confirmed format** — use this one | **First positive result** (see below) |
 | `zlatezany` | Drops the format gate entirely — any depth format | Not needed: the probe identified the format | Built; superseded by `zlatez` |
 
-**A/B result (2026-07-30, `gtk_0.6`, GT5P one-lap HSL, N=3 per arm):** gear **off** → 3/3 wedged
-(`00E59005`), 5 rescues. Gear **on** → 3/3 completed the race, saved and exited cleanly, 0 rescues,
-PERFECT% 2.4 → 7.1. This is the first fork gear to beat its own control on this fault.
+**A/B result (2026-07-30, `gtk_0.6`, GT5P one-lap HSL, N=3 per arm, single sitting):** gear **off**
+→ 3/3 wedged (`00E59005`), 5 rescues. Gear **on** → 3/3 completed the race, saved and exited
+cleanly, 0 rescues, PERFECT% 2.4 → 7.1. This is the first fork gear to beat its own control on this
+fault, and the mechanism was predicted in advance by the `dimlog` probe rather than found by
+fishing the ledger.
 
-Caveats that keep it provisional: N=3, and **one lap** — the documented boss is HSL-reverse at
-~lap 4–5, so this does not yet separate *eliminated* from *delayed*. Multi-lap is the next test.
+Caveats that keep it provisional: N=3; **one lap** (the documented boss is HSL-reverse at ~lap 4–5,
+so this does not separate *eliminated* from *delayed*); and one title — `BCUS98158` is GT5P **Spec
+II**, the title that was separately hit by an RPCS3 ARM64 SPU miscompile.
+
+> **Sessions after 2026-07-31 09:46 do not extend this result.** Two follow-on claims — an "N=6
+> extension" and an "exposure gradient" — were withdrawn on 08-01: the first pooled across an RPCS3
+> base bump, the second read the Spec II boot-fatal window as driver behaviour. See
+> [`PATCHES.md`](PATCHES.md). Only the 07-30 block is single-stack.
 
 > Reading the ledger: a completed session is race + save + graceful exit, a crashed one just stops,
 > so **a winning arm can show shorter durations than a losing one**. Compare `status` and `rescues`

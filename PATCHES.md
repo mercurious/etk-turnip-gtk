@@ -180,17 +180,44 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   - N=3 per arm (Fisher exact on 3/3 vs 0/3 ≈ p 0.05 — the edge, not the far side of it).
   - **One lap.** The documented reference boss is HSL-*reverse* at ~lap 4–5, a longer workload than
     this. Passing one lap does not show the wedge is eliminated rather than delayed.
-  - `gtk_0.5` + `zlatez` crashed 2/3 while `gtk_0.6` + `zlatez` crashed 0/3, with only the
-    query-survive default between them — a default on the *query* path, while these faults are all
-    fence-path `00E59005`. Most likely N=3 noise, but it is unexplained, so pooled across both
-    drivers the gear is 2/6 rather than 0/3.
+  - **One title, and a fragile one.** `BCUS98158` is GT5P **Spec II**, which is exactly the title
+    hit by the RPCS3 `CellSpursKernel0` boot fatal described below.
 
-  Next: multi-lap on `gtk_0.6` with the gear on, N≥3. If it holds past the lap-4/5 boss, the result
-  is conclusive and directly reportable upstream as a widening of `a70d2af590db`.
+  Next: multi-lap on `gtk_0.6` with the gear on, N≥3, **on a single frozen stack**. If it holds past
+  the lap-4/5 boss, the result is conclusive and directly reportable upstream as a widening of
+  `a70d2af590db`.
 
-- **Separate finding — a 26.1.6 base regression, not the gear.** Frametime jitter is elevated on
+  ### Retracted: the "N=6" extension and the "exposure gradient" (2026-08-01)
+
+  Two follow-on claims were made from sessions after 2026-07-31 09:46. **Both are withdrawn** — they
+  were reading a stack that moved underneath the experiment, not the driver.
+
+  - **"N=6, 2/6 vs 6/6, p≈0.03."** Withdrawn. The second half of that pooling ran after the ETK
+    RPCS3 fork base-bumped from `v0.0.41-19544` to `v0.0.41-19638-a1deb2921` (commits 07-31
+    09:46–09:49), roughly an hour before those sessions. The ON arm's apparent decay from 0/3 to 2/3
+    coincides with that bump, not with anything about the gear. Arms that span a base bump are not
+    one arm.
+  - **"Protection degrades with exposure (0/8 short, 2/6 medium, 2/2 long)."** Withdrawn. Those
+    short runs and the cluster of ~3 s `ABORTED` rows fall inside the window where GT5P **Spec II**
+    (`BCUS98158`, ISO) hit a deterministic `CellSpursKernel0` boot fatal — upstream RPCS3
+    `1d657c4e6` stops registering the SPU reduced-loop pattern, which reroutes an older-SPURS loop
+    through SPU LLVM and miscompiles it on ARM64. Bisected over 8 hardware rounds and fixed by a
+    temporary revert (`etk-rpcs3-gtk` `c40dcf0`, 08-01 11:44). That was the emulator failing to
+    boot, not the driver protecting less well at length.
+
+  **What survives is the 07-30 evening block alone** — six sessions, one sitting, one stack,
+  N=3 per arm. That is the table above, and it is still the only clean comparison in the ledger.
+
+  The lesson is the same one Patch #8 encodes for the driver, one layer up: **an A/B is only a
+  measurement if every layer under it is pinned.** Stack attribution (`stack=rk…/k…/r…` in the
+  ledger's `tune_tag`) exists so this class of error is visible in the data rather than
+  reconstructed afterwards from commit timestamps.
+
+- **Separate finding — a 26.1.6 jitter regression, provisional.** Frametime jitter is elevated on
   every 26.1.6 row (`6.5–9.9 ms`) versus every 26.1.3-era row (`3.4–6.0 ms`), and it persists with
-  `zlatez` **off**, so it belongs to the base bump. Unexplained; worth isolating on its own.
+  `zlatez` **off**, so it is not the gear. It is *probably* the base bump — but the 26.1.3-era
+  comparison rows also predate the RPCS3 base bump, so Turnip and RPCS3 are not separated here
+  either. Re-measure on one frozen stack before treating it as a Turnip regression.
 
 - **Probe (2026-07-30, the run that justified the A/B) — the hypothesis survived its
   falsification test.** `gtk_0.5` on the rig, `TU_DEBUG=dimlog`, no z-gear, GT5P (BCUS98158,
