@@ -55,6 +55,11 @@ PATCH_DIR="${PATCH_DIR:-$(cd "$(dirname "$0")/.." && pwd)/patches}"
 
 # Release line derived from the base ref, used to pick the backport set:
 #   mesa-26.1.6 -> 26.1   mesa-26.2.0-rc3 -> 26.2   26.2 -> 26.2   main -> main
+# A raw commit sha has no line to derive, so it falls to "main" — which is
+# correct: a devel-branch pin needs no backports, it already carries everything.
+if [[ -z "${BASE_LINE:-}" && "${BASE_TAG}" =~ ^[0-9a-f]{7,40}$ ]]; then
+  BASE_LINE="main"
+fi
 BASE_LINE="${BASE_LINE:-$(printf '%s' "${BASE_TAG}" | sed -E 's/^mesa-//; s/^([0-9]+\.[0-9]+).*/\1/')}"
 BACKPORT_DIR="${BACKPORT_DIR:-${PATCH_DIR}/backports/${BASE_LINE}}"
 
@@ -98,6 +103,10 @@ Usage: $0 <build|apply>
           Stable:      $0 apply
           Pre-release: BASE_TAG=mesa-26.2.0-rc3 FORK_BRANCH=etk-gtk-26.2 $0 apply
           Branch tip:  BASE_TAG=26.2 REUSE=1 $0 apply
+          Devel pin:   BASE_TAG=<40-hex-sha> FORK_BRANCH=etk-gtk-devel $0 apply
+                       (pin main by SHA, never by branch name — "main" is a
+                        position, not a version, so a branch-tracked build
+                        cannot be identified after the fact)
 
 Current base : ${BASE_TAG}  (line ${BASE_LINE})
 Backports    : ${BACKPORT_DIR}
@@ -160,6 +169,22 @@ clone_upstream() {
     # `clean -fdx` deletes them and turns every re-pull into a full rebuild
     # (~700 objects). Everything else untracked still goes.
     git -C "${WORKDIR}" clean -qfdx -e 'build*'
+  elif [[ "${BASE_TAG}" =~ ^[0-9a-f]{7,40}$ ]]; then
+    # Commit-sha base. `git clone --branch` takes a tag or a branch name and
+    # will reject a raw sha, so pin by fetching the object directly.
+    #
+    # This exists because `main` is a POSITION, not a version: two builds a week
+    # apart both call themselves 26.3.0-devel and are different drivers. Tracking
+    # the branch would put a name in the ledger that cannot identify what ran,
+    # defeating the whole point of stack attribution. Devel-branch builds must
+    # be pinned.
+    echo ">> Pinning ${UPSTREAM_URL} @ commit ${BASE_TAG} -> ${WORKDIR}"
+    git init -q "${WORKDIR}"
+    git -C "${WORKDIR}" remote add origin "${UPSTREAM_URL}"
+    # Needs the server to allow fetching a non-tip object (GitLab does).
+    git -C "${WORKDIR}" fetch -q --depth 1 origin "${BASE_TAG}" \
+      || { echo "ERROR: could not fetch commit ${BASE_TAG} (server may not allow sha fetch)." >&2; exit 1; }
+    git -C "${WORKDIR}" checkout -q --detach FETCH_HEAD
   else
     echo ">> Cloning ${UPSTREAM_URL} @ ${BASE_TAG} (shallow) -> ${WORKDIR}"
     git clone --depth 1 --branch "${BASE_TAG}" "${UPSTREAM_URL}" "${WORKDIR}"

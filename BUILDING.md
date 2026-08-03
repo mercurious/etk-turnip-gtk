@@ -31,11 +31,28 @@ experimental:
 BASE_TAG=mesa-26.2.0-rc3 FORK_BRANCH=etk-gtk-26.2 ./scripts/prepare-fork-branch.sh apply
 ```
 
-`BASE_TAG` accepts anything `git clone --branch` accepts: a release tag, an rc tag, a stable branch
-(`26.2`), or `main`. For a moving branch, add `REUSE=1` to re-pull an existing checkout in place.
-The backport set is chosen automatically from the base — `patches/backports/26.1/` for the 26.1 line,
-nothing for 26.2 (which carries those commits natively). Verified clean on `mesa-26.1.6` and
-`mesa-26.2.0-rc3`.
+`BASE_TAG` accepts a release tag, an rc tag, a stable branch (`26.2`), `main`, or a **commit sha**.
+For a moving branch, add `REUSE=1` to re-pull an existing checkout in place. The backport set is
+chosen automatically from the base — `patches/backports/26.1/` for the 26.1 line, nothing for 26.2
+(which carries those commits natively). Verified clean on `mesa-26.1.6` and `mesa-26.2.0-rc3`.
+
+### Devel-branch builds must be pinned by sha, not tracked by name
+
+```bash
+BASE_TAG=84acd8488ad671d17bcdaf432b01a2e06db34fb3 FORK_BRANCH=etk-gtk-devel \
+  ./scripts/prepare-fork-branch.sh apply
+```
+
+`main` is a **position, not a version**. Two builds a week apart both report `26.3.0-devel` and are
+different drivers — so a branch-tracked build puts a name in the ledger that cannot identify what
+ran, defeating stack attribution. Pin the sha and carry it in the artifact name
+(`…26.3.0-devel-84acd84_gtk_0.x.so`).
+
+> **Naming, because the community convention is misleading.** Android adrenotools packages (e.g.
+> `Turnip_v26.3.0-Rn`) are named after `main`'s in-progress VERSION string, so "v26.3.0" means
+> *main as of that date* — there is no Mesa 26.3 branchpoint or rc. Their `v26.2.0-R8` (2026-07-09,
+> pre-branchpoint `main`) is **older, less stabilised code** than `mesa-26.2.0-rc3` (2026-07-29, the
+> stabilisation branch). A higher number is not a newer release.
 
 ## Configure
 
