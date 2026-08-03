@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: mercurious <dutch.money@gmail.com>
-Date: Thu, 30 Jul 2026 19:47:44 -0400
+Date: Mon, 3 Aug 2026 12:17:51 -0400
 Subject: [PATCH 7/8] zlatez: widen the A650 EARLY_Z_LATE_Z hang workaround
  past its D32S8 gate
 
@@ -31,9 +31,7 @@ reportable as an upstream MR. Status on commit: BUILT, not yet validated.
 See PATCHES.md and GEARS.md.
 ---
  src/freedreno/vulkan/tu_cmd_buffer.cc | 33 +++++++++++++++++++++++++++
- src/freedreno/vulkan/tu_util.cc       |  3 +++
- src/freedreno/vulkan/tu_util.h        |  6 +++++
- 3 files changed, 42 insertions(+)
+ 1 file changed, 33 insertions(+)
 
 diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
 index a91ae08..afbef8e 100644
@@ -86,44 +84,6 @@ index a91ae08..afbef8e 100644
     if ((stencil_test_enable && depth_format == VK_FORMAT_S8_UINT) ||
         (ds_test_enable &&
          (fs->fs.lrz.force_late_z || cmd->state.lrz.force_late_z)))
-diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
-index b4d9d60..33833fc 100644
---- a/src/freedreno/vulkan/tu_util.cc
-+++ b/src/freedreno/vulkan/tu_util.cc
-@@ -44,6 +44,8 @@ static const struct debug_control tu_debug_options[] = {
-    { "ccuquarter", TU_DEBUG_CCUQUARTER },
-    { "dsbypass", TU_DEBUG_DSBYPASS },
-    { "dsany", TU_DEBUG_DSANY },
-+   { "zlatez", TU_DEBUG_ZLATEZ },
-+   { "zlatezany", TU_DEBUG_ZLATEZANY },
-    { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
-    { "rast_order", TU_DEBUG_RAST_ORDER },
-    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
-@@ -82,6 +84,7 @@ const uint64_t tu_runtime_debug_flags =
-    TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME |
-    TU_DEBUG_SDCLEAN | TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG |
-    TU_DEBUG_CCUHALF | TU_DEBUG_CCUQUARTER | TU_DEBUG_DSBYPASS | TU_DEBUG_DSANY |
-+   TU_DEBUG_ZLATEZ | TU_DEBUG_ZLATEZANY |
-    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
-    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |
-    TU_DEBUG_NO_CONCURRENT_RESOLVES | TU_DEBUG_NO_CONCURRENT_UNRESOLVES |
-diff --git a/src/freedreno/vulkan/tu_util.h b/src/freedreno/vulkan/tu_util.h
-index a0bc7e7..3020ec1 100644
---- a/src/freedreno/vulkan/tu_util.h
-+++ b/src/freedreno/vulkan/tu_util.h
-@@ -74,6 +74,12 @@ enum tu_debug_flags : uint64_t
-     * dsbypass's store=true requirement, which missed the boss's alignment-driven
-     * ragged-depth resolve). Catches the boss pass -> conclusive avoid-resolve test. */
-    TU_DEBUG_DSANY                   = BITFIELD64_BIT(46),
-+   /* ETK Patch #7 (zlatez): widen upstream's A630/A650 EARLY_Z_LATE_Z hang
-+    * workaround past its D32S8 format gate. zlatez adds D24_UNORM_S8_UINT (the
-+    * ETK reference format); zlatezany drops the format gate entirely. Gated in
-+    * tu6_build_depth_plane_z_mode; A6XX-only, default-off. */
-+   TU_DEBUG_ZLATEZ                  = BITFIELD64_BIT(47),
-+   TU_DEBUG_ZLATEZANY               = BITFIELD64_BIT(48),
-    TU_DEBUG_PUSH_CONSTS_PER_STAGE    = BITFIELD64_BIT(11),
-    TU_DEBUG_GMEM                     = BITFIELD64_BIT(12),
-    TU_DEBUG_RAST_ORDER               = BITFIELD64_BIT(13),
 -- 
 2.50.1 (Apple Git-155)
 

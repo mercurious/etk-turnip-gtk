@@ -5,10 +5,12 @@ Subject: [PATCH 1/8] ETK GTK gears: LSD/sddepth depth-cache barriers + dimlog
  (squashed import over mesa-26.1.3; see PATCHES.md)
 
 ---
- src/freedreno/vulkan/tu_cmd_buffer.cc | 30 +++++++++++++++++++++++++++
- src/freedreno/vulkan/tu_util.cc       | 21 +++++++++++++++++++
- src/freedreno/vulkan/tu_util.h        | 13 ++++++++++++
- 3 files changed, 64 insertions(+)
+ src/freedreno/vulkan/tu_cmd_buffer.cc |  30 +++++++
+ src/freedreno/vulkan/tu_etk_gears.h   | 112 ++++++++++++++++++++++++++
+ src/freedreno/vulkan/tu_util.cc       |  16 ++++
+ src/freedreno/vulkan/tu_util.h        |   5 ++
+ 4 files changed, 163 insertions(+)
+ create mode 100644 src/freedreno/vulkan/tu_etk_gears.h
 
 diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
 index f1bd56e..dc55c01 100644
@@ -58,33 +60,146 @@ index f1bd56e..dc55c01 100644
  
     /* Experiments show that invalidating CCU while it still has data in it
      * doesn't work, so make sure to always flush before invalidating in case
+diff --git a/src/freedreno/vulkan/tu_etk_gears.h b/src/freedreno/vulkan/tu_etk_gears.h
+new file mode 100644
+index 0000000..79cc283
+--- /dev/null
++++ b/src/freedreno/vulkan/tu_etk_gears.h
+@@ -0,0 +1,112 @@
++/*
++ * Copyright © 2026 ETK (Emulation Tuning Kit)
++ * SPDX-License-Identifier: MIT
++ */
++
++/* ETK gear registry — every fork-added TU_DEBUG flag, in one place.
++ *
++ * WHY THIS FILE EXISTS
++ * --------------------
++ * The fork's gears used to register themselves inline, each patch editing
++ * `enum tu_debug_flags` (tu_util.h) and `tu_debug_options[]` /
++ * `tu_runtime_debug_flags` (tu_util.cc). That produced two failure modes, both
++ * observed for real while rebasing onto Mesa main (2026-08-03):
++ *
++ *   1. UPSTREAM CHURN. The ETK bits sat mid-enum, between upstream's bits 10
++ *      and 11 — maximum conflict surface. Any upstream edit near there broke
++ *      our hunks.
++ *
++ *   2. INTERNAL COUPLING. Because every patch appended to the same two lists,
++ *      patch N's diff context contained patch N-1's additions. The series
++ *      became an all-or-nothing ordered set: skip one gear and every later
++ *      patch failed to apply, even ones touching completely unrelated code.
++ *      Concretely, `zlatez` (a live experiment) could not be applied to main
++ *      because `dsany` (a falsified, droppable gear) was skipped ahead of it.
++ *
++ * Both are fixed by registering everything here, once, in the FIRST fork patch,
++ * and exposing it to the upstream files through three macros. Upstream files
++ * then carry ONE single-line insertion each instead of N multi-line hunks, and
++ * no fork patch's application depends on any other fork patch.
++ *
++ * A gear registered here with no implementation behind it is inert — it parses
++ * and sets a bit nobody reads. That is deliberate: it lets an individual gear
++ * patch be dropped on a base where it does not apply, without disturbing the
++ * rest of the series.
++ *
++ * This file is pure macro definition — no includes, no code. BITFIELD64_BIT
++ * resolves at the expansion site in tu_util.h.
++ *
++ * BIT ALLOCATION — ETK COUNTS DOWN FROM 63, UPSTREAM COUNTS UP FROM 0.
++ * The fork originally hard-coded 37+ "to stay clear of upstream, which is in
++ * the 30s". Upstream reached 37 in 26.2 (TU_DEBUG_COMPUTE_ROUND_ROBIN) and
++ * silently aliased TU_DEBUG_SDDEPTH — C permits duplicate enum values, so the
++ * shipped 26.2.0-rc3 driver had `sddepth` and `computeroundrobin` as the same
++ * bit, each enabling the other. Found 2026-08-03 while decoupling.
++ *
++ * ETK_GEAR_BIT(n) allocates 63, 62, 61 ... so the two allocators grow toward
++ * each other and can only meet in the middle, where it is obvious rather than
++ * silent. Upstream is at 37; there is room for ~14 more upstream flags and 4
++ * more ETK gears before they touch.
++ */
++
++#ifndef TU_ETK_GEARS_H
++#define TU_ETK_GEARS_H
++
++/* Nth ETK gear bit, counting down from the top of the u64. */
++#define ETK_GEAR_BIT(n) BITFIELD64_BIT(63 - (n))
++
++/* Expanded inside `enum tu_debug_flags` (tu_util.h). */
++#define ETK_DEBUG_FLAG_BITS                                                    \
++   /* LSD gears (FPS-recovery transmission) — lighter per-draw barriers than    \
++    * syncdraw; gated in tu6_emit_flushes. sdclean = depth-clean only (no       \
++    * waits); sdgate = depth-clean gated to depth-writing draws. */            \
++   TU_DEBUG_SDDEPTH    = ETK_GEAR_BIT(0),                                   \
++   TU_DEBUG_SDMEM      = ETK_GEAR_BIT(1),                                   \
++   TU_DEBUG_SDME       = ETK_GEAR_BIT(2),                                   \
++   TU_DEBUG_SDCLEAN    = ETK_GEAR_BIT(3),                                   \
++   TU_DEBUG_SDGATE     = ETK_GEAR_BIT(4),                                   \
++   /* Resolution-alignment investigation (Stage IV §5): dimlog instruments the  \
++    * GMEM render-target/bin dims + ragged remainder at tiling setup, and the   \
++    * zlatez hazard-state probe. Inert unless TU_DEBUG=dimlog. */               \
++   TU_DEBUG_DIMLOG     = ETK_GEAR_BIT(5),                                   \
++   /* Patch #3 "B": cap the a6xx depth CCU cache size at the RB_CCU_CNTL emit   \
++    * (FULL->HALF/QUARTER). FALSIFIED — smaller made it worse. Do not retry. */ \
++   TU_DEBUG_CCUHALF    = ETK_GEAR_BIT(6),                                   \
++   TU_DEBUG_CCUQUARTER = ETK_GEAR_BIT(7),                                   \
++   /* Patch #3 "A": route depth-storing (dsbypass) or ANY depth-attachment      \
++    * (dsany) renderpass to sysmem. FALSIFIED — the boss resolve is an internal \
++    * GMEM store, not a renderpass attachment resolve, so neither reaches it. */\
++   TU_DEBUG_DSBYPASS   = ETK_GEAR_BIT(8),                                   \
++   TU_DEBUG_DSANY      = ETK_GEAR_BIT(9),                                   \
++   /* Patch #7: widen upstream's A630/A650 EARLY_Z_LATE_Z hang workaround past  \
++    * its D32S8 format gate. zlatez adds D24_UNORM_S8_UINT (the ETK reference   \
++    * format, confirmed by the dimlog probe); zlatezany drops the format gate   \
++    * entirely. Gated in tu6_build_depth_plane_z_mode; A6XX-only. */            \
++   TU_DEBUG_ZLATEZ     = ETK_GEAR_BIT(10),                                   \
++   TU_DEBUG_ZLATEZANY  = ETK_GEAR_BIT(11),
++
++/* Expanded inside `tu_debug_options[]` (tu_util.cc), before the NULL sentinel. */
++#define ETK_DEBUG_OPTIONS                                                      \
++   { "sddepth",    TU_DEBUG_SDDEPTH },                                         \
++   { "sdmem",      TU_DEBUG_SDMEM },                                           \
++   { "sdme",       TU_DEBUG_SDME },                                            \
++   { "sdclean",    TU_DEBUG_SDCLEAN },                                         \
++   { "sdgate",     TU_DEBUG_SDGATE },                                          \
++   { "dimlog",     TU_DEBUG_DIMLOG },                                          \
++   { "ccuhalf",    TU_DEBUG_CCUHALF },                                         \
++   { "ccuquarter", TU_DEBUG_CCUQUARTER },                                      \
++   { "dsbypass",   TU_DEBUG_DSBYPASS },                                        \
++   { "dsany",      TU_DEBUG_DSANY },                                           \
++   { "zlatez",     TU_DEBUG_ZLATEZ },                                          \
++   { "zlatezany",  TU_DEBUG_ZLATEZANY },
++
++/* OR'd into `tu_runtime_debug_flags` (tu_util.cc). Every ETK gear is runtime-
++ * toggleable: they are all default-off diagnostics or opt-in barriers, none
++ * change state the driver captures at init. */
++#define ETK_RUNTIME_DEBUG_FLAGS                                                \
++   (TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME | TU_DEBUG_SDCLEAN |     \
++    TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG | TU_DEBUG_CCUHALF |                     \
++    TU_DEBUG_CCUQUARTER | TU_DEBUG_DSBYPASS | TU_DEBUG_DSANY |                 \
++    TU_DEBUG_ZLATEZ | TU_DEBUG_ZLATEZANY)
++
++#endif /* TU_ETK_GEARS_H */
 diff --git a/src/freedreno/vulkan/tu_util.cc b/src/freedreno/vulkan/tu_util.cc
-index 1fbf2dd..5632622 100644
+index 1fbf2dd..8bd541c 100644
 --- a/src/freedreno/vulkan/tu_util.cc
 +++ b/src/freedreno/vulkan/tu_util.cc
-@@ -34,6 +34,12 @@ static const struct debug_control tu_debug_options[] = {
-    { "perfc", TU_DEBUG_PERFC },
-    { "flushall", TU_DEBUG_FLUSHALL },
-    { "syncdraw", TU_DEBUG_SYNCDRAW },
-+   { "sddepth", TU_DEBUG_SDDEPTH },
-+   { "sdmem", TU_DEBUG_SDMEM },
-+   { "sdme", TU_DEBUG_SDME },
-+   { "sdclean", TU_DEBUG_SDCLEAN },
-+   { "sdgate", TU_DEBUG_SDGATE },
-+   { "dimlog", TU_DEBUG_DIMLOG },
-    { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
-    { "rast_order", TU_DEBUG_RAST_ORDER },
-    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
-@@ -69,6 +75,8 @@ const uint64_t tu_runtime_debug_flags =
+@@ -19,6 +19,8 @@
+ #include "tu_pass.h"
+ 
+ static const struct debug_control tu_debug_options[] = {
++   ETK_DEBUG_OPTIONS   /* fork gears (tu_etk_gears.h) — leading on purpose:
++                        * upstream appends, so a trailing anchor would move. */
+    { "startup", TU_DEBUG_STARTUP },
+    { "nir", TU_DEBUG_NIR },
+    { "nobin", TU_DEBUG_NOBIN },
+@@ -66,6 +68,7 @@ static const struct debug_control tu_debug_options[] = {
+  * Note: Keep in sync with the list of flags in 'docs/drivers/freedreno.rst'.
+  */
+ const uint64_t tu_runtime_debug_flags =
++   ETK_RUNTIME_DEBUG_FLAGS |
     TU_DEBUG_NIR | TU_DEBUG_NOBIN | TU_DEBUG_SYSMEM | TU_DEBUG_GMEM |
     TU_DEBUG_FORCEBIN | TU_DEBUG_LAYOUT | TU_DEBUG_NOLRZ | TU_DEBUG_NOLRZFC |
     TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
-+   TU_DEBUG_SDDEPTH | TU_DEBUG_SDMEM | TU_DEBUG_SDME |
-+   TU_DEBUG_SDCLEAN | TU_DEBUG_SDGATE | TU_DEBUG_DIMLOG |
-    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
-    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |
-    TU_DEBUG_NO_CONCURRENT_RESOLVES | TU_DEBUG_NO_CONCURRENT_UNRESOLVES |
-@@ -352,6 +360,19 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
+@@ -352,6 +355,19 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
           tiling->vsc.tile_count.height = 2;
        }
     }
@@ -105,29 +220,28 @@ index 1fbf2dd..5632622 100644
  
  static bool
 diff --git a/src/freedreno/vulkan/tu_util.h b/src/freedreno/vulkan/tu_util.h
-index cfa18f3..011293a 100644
+index cfa18f3..93d6bd3 100644
 --- a/src/freedreno/vulkan/tu_util.h
 +++ b/src/freedreno/vulkan/tu_util.h
-@@ -48,6 +48,19 @@ enum tu_debug_flags : uint64_t
-    TU_DEBUG_PERFC                    = BITFIELD64_BIT(8),
-    TU_DEBUG_FLUSHALL                 = BITFIELD64_BIT(9),
-    TU_DEBUG_SYNCDRAW                 = BITFIELD64_BIT(10),
-+   /* ETK LSD gears (FPS-recovery transmission) — lighter per-draw barriers
-+    * than syncdraw; gate in tu6_emit_flushes. */
-+   TU_DEBUG_SDDEPTH                  = BITFIELD64_BIT(37),
-+   TU_DEBUG_SDMEM                   = BITFIELD64_BIT(38),
-+   TU_DEBUG_SDME                    = BITFIELD64_BIT(39),
-+   /* Patch #2: sdclean = depth-clean only (no waits); sdgate = depth-clean
-+    * gated to depth-writing draws (the hazard class). */
-+   TU_DEBUG_SDCLEAN                 = BITFIELD64_BIT(40),
-+   TU_DEBUG_SDGATE                  = BITFIELD64_BIT(41),
-+   /* ETK resolution-alignment investigation (Stage IV §5): dimlog instruments
-+    * the GMEM render-target/bin dims + ragged remainder at tiling setup. Inert
-+    * unless TU_DEBUG=dimlog. rtalign (the fix) reserves the next bit. */
-+   TU_DEBUG_DIMLOG                  = BITFIELD64_BIT(42),
-    TU_DEBUG_PUSH_CONSTS_PER_STAGE    = BITFIELD64_BIT(11),
-    TU_DEBUG_GMEM                     = BITFIELD64_BIT(12),
-    TU_DEBUG_RAST_ORDER               = BITFIELD64_BIT(13),
+@@ -10,6 +10,7 @@
+ #define TU_UTIL_H
+ 
+ #include "tu_common.h"
++#include "tu_etk_gears.h"
+ 
+ #include <atomic>
+ 
+@@ -37,6 +38,10 @@
+ 
+ enum tu_debug_flags : uint64_t
+ {
++   /* ETK gears — defined in tu_etk_gears.h. Anchored at the TOP of the enum on
++    * purpose: upstream only ever appends, so a leading insertion point does not
++    * move when upstream adds a flag. */
++   ETK_DEBUG_FLAG_BITS
+    TU_DEBUG_STARTUP                  = BITFIELD64_BIT(0),
+    TU_DEBUG_NIR                      = BITFIELD64_BIT(1),
+    TU_DEBUG_NOBIN                    = BITFIELD64_BIT(2),
 -- 
 2.50.1 (Apple Git-155)
 

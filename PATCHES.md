@@ -267,6 +267,57 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   the published series — it would have been lost on the first rebase. Carrying it as a patch fixes
   that.
 
+## The gear registry — and the bit collision it uncovered (2026-08-03)
+
+Every fork gear used to register itself inline, each patch editing `enum tu_debug_flags`
+(`tu_util.h`) and `tu_debug_options[]` / `tu_runtime_debug_flags` (`tu_util.cc`). That produced two
+failures, both hit for real while testing a rebase onto Mesa `main`:
+
+1. **Upstream churn.** The ETK bits sat *mid-enum*, between upstream's bits 10 and 11 — the maximum
+   possible conflict surface.
+2. **Internal coupling.** Because every patch appended to the same two lists, patch *N*'s diff
+   context contained patch *N−1*'s additions. The series became an all-or-nothing ordered set:
+   `zlatez` (a live experiment) could not be applied to `main` because `dsany` (a falsified,
+   droppable gear) had been skipped ahead of it.
+
+Both are fixed by `src/freedreno/vulkan/tu_etk_gears.h` — a new file holding every gear, exposed to
+the upstream files through three macros (`ETK_DEBUG_FLAG_BITS`, `ETK_DEBUG_OPTIONS`,
+`ETK_RUNTIME_DEBUG_FLAGS`). Upstream files now carry **one single-line insertion each**, all
+anchored at the *opening* of their construct — upstream only ever appends, so a leading anchor
+doesn't move when upstream adds a flag. All registration lands in patch 0001; no later patch touches
+`tu_util.{h,cc}` at all.
+
+Result on `main`: failures went from **4 → 1**, and the survivor is patch 0002 (`ccuhalf`), where
+upstream refactored `emit_rb_ccu_cntl`'s `depth_cache_size` from a literal to
+`cfg->depth_cache_fraction` across three sites. That gear is falsified, so it is dropped on a
+devel base rather than ported.
+
+### The bug this surfaced: `sddepth` was aliased to an upstream flag on 26.2
+
+The fork hard-coded its bits at 37+, on the reasoning that upstream "is in the 30s". **Upstream
+reached 37 in 26.2** — `TU_DEBUG_COMPUTE_ROUND_ROBIN = BITFIELD64_BIT(37)` — colliding with
+`TU_DEBUG_SDDEPTH`. C permits duplicate enum values silently, so it compiled clean and shipped:
+
+| Base | bit 37 |
+|---|---|
+| 26.1.3 / 26.1.6 | free — the 26.1 drivers are unaffected |
+| **26.2.0-rc3, main** | **`TU_DEBUG_COMPUTE_ROUND_ROBIN`** — aliased with `sddepth` |
+
+On the `26.2.0-rc3_gtk_0.6` driver, `TU_DEBUG=sddepth` also enabled upstream's compute round-robin,
+and `computeroundrobin` also enabled the ETK depth barriers. **The `zlatez` A/B results are not
+affected** — they used `zlatez` (a different bit) and `default` — but any `sddepth` measurement on
+a 26.2 driver is contaminated and must be discarded.
+
+**The fix is structural, not a renumber.** `ETK_GEAR_BIT(n)` allocates from bit 63 *downward*, so
+upstream (counting up from 0) and ETK (counting down from 63) grow toward each other and can only
+meet in the middle — where it is obvious rather than silent. ETK now occupies 52–63; upstream's max
+is 37, leaving a 14-bit gap.
+
+> The general lesson, and it is the same one Patch #8 and the `stack=` tag encode: **a fork must not
+> assume anything about space it does not own.** "Upstream is in the 30s" was true when written and
+> false one release later, and nothing in the build or the tests could have caught it — only reading
+> upstream's enum did.
+
 ## Rebase 26.1.3 → 26.1.6 (2026-07-30)
 
 **Cost: near zero.** Of the files the series touches, only `tu_cmd_buffer.cc` changed upstream

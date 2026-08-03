@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: mercurious <dutch.money@gmail.com>
-Date: Thu, 30 Jul 2026 19:43:13 -0400
+Date: Mon, 3 Aug 2026 12:17:50 -0400
 Subject: [PATCH 5/8] t3devlost: device-loss detection via per-object staleness
 
 Kernel 7.0.11 recovers an a6xx hang via hangcheck but does NOT advance

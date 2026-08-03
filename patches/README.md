@@ -17,9 +17,17 @@ treats an empty backport set as a no-op rather than an error.
 
 ## Fork series
 
+> **Registration is decoupled.** Every fork gear is declared once in
+> `src/freedreno/vulkan/tu_etk_gears.h` (added by patch 0001) and reaches the upstream files through
+> three macros, each a single-line insertion anchored at the *opening* of its construct. **No patch
+> after 0001 touches `tu_util.{h,cc}`**, so a gear can be dropped on a base where it doesn't apply
+> without breaking the rest of the series. ETK bits allocate from 63 downward (`ETK_GEAR_BIT`) while
+> upstream counts up from 0 — see [`../PATCHES.md`](../PATCHES.md) for the collision that motivated
+> this.
+
 | Patch | What it is | Status |
 |-------|-----------|--------|
-| `0001-ETK-GTK-gears-…` | The LSD FPS-recovery gears: `sddepth`/`sdmem`/`sdme` depth-cache barriers + `dimlog`, in `tu_cmd_buffer.cc` + `tu_util.{cc,h}`. Squashed, because the source tree imported them as one commit with no stock baseline between. | **Kept** (default-off; FPS levers — `syncdraw` owns stability) |
+| `0001-ETK-GTK-gears-…` | The gear registry (`tu_etk_gears.h`) plus the LSD FPS-recovery gears: `sddepth`/`sdmem`/`sdme` depth-cache barriers + `dimlog`, in `tu_cmd_buffer.cc` + `tu_util.{cc,h}`. Squashed, because the source tree imported them as one commit with no stock baseline between. | **Kept** (default-off; FPS levers — `syncdraw` owns stability) |
 | `0002-Patch-3-B-ccuhalf-ccuquarter-…` | Cap a6xx depth CCU cache size. | Falsified |
 | `0003-Patch-3-A-dsbypass-…` | Selective sysmem for depth-storing renderpasses. | Falsified |
 | `0004-Refined-A-dsany-…` | Route any depth-attachment renderpass to sysmem. | Falsified |
