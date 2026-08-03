@@ -162,7 +162,11 @@ clone_upstream() {
     echo ">> Re-pulling ${BASE_TAG} into existing ${WORKDIR} (REUSE=1)"
     git -C "${WORKDIR}" fetch --depth 1 origin "${BASE_TAG}"
     # Drop any previous run's fork branch so the series never applies twice.
-    git -C "${WORKDIR}" checkout -q --detach FETCH_HEAD
+    # -f because a re-pull must not be blocked by local edits: this WORKDIR is a
+    # disposable build checkout reproduced from ./patches/, so anything dirty in
+    # it is scratch by definition. Without -f, `checkout --detach` aborts on a
+    # modified tracked file and the whole re-apply fails.
+    git -C "${WORKDIR}" checkout -q -f --detach FETCH_HEAD
     git -C "${WORKDIR}" branch -D "${FORK_BRANCH}" 2>/dev/null || true
     git -C "${WORKDIR}" reset -q --hard FETCH_HEAD
     # Preserve meson/ninja build trees: they are untracked, so a bare
