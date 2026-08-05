@@ -10,6 +10,36 @@ of scope here.)
 - An ARM64 Linux build environment (native arm64 avoids Rosetta/emulation issues). The reference
   setup is a Docker container, `turnip-rocknix`, on Ubuntu 24.04 arm64. On macOS this runs under
   [colima](https://github.com/abiosoft/colima)/Docker; a native arm64 Linux box or VM is preferred.
+
+  **Provision it with one command, locally or remotely:**
+
+  ```bash
+  scripts/provision-build-container.sh                          # local docker
+  ETK_BUILD_HOST=etk-cloud scripts/provision-build-container.sh  # remote arm64 box
+  ```
+
+  It is idempotent, pins `meson` (Ubuntu 24.04's apt meson is too old for Mesa 26.x), and sets the
+  container's git identity — `prepare-fork-branch.sh` runs `git am`, which refuses to commit
+  without one. The dependency list is not guessed: it is `apt-mark showmanual` from the container
+  that has produced every shipped driver since 26.1.3.
+
+  Building in an `ubuntu:24.04` container makes glibc and the toolchain a property of the *recipe*
+  rather than of whichever machine ran it — the same reasoning as the self-identifying driver.
+
+  > **It does not give you byte-reproducible builds, and measured evidence says so.** The same
+  > series built on the laptop container and on `etk-cloud` produced different binaries
+  > (17,614,520 vs 17,548,592 bytes). `ubuntu:24.04` is a *rolling* tag and `apt-get install` takes
+  > whatever is current, so a container provisioned in July and one provisioned in August differ —
+  > confirmed here as `libc6-dev` `2.39-0ubuntu8.7` vs `8.8`, with the remaining size delta not
+  > fully isolated. Every other build-relevant package matched.
+  >
+  > Practical consequences:
+  > - **Don't mix hosts inside one campaign.** Build an A/B's arms on the same container.
+  > - The driver's `(git-<sha>)` makes the two distinguishable in `vulkaninfo` and in every ledger
+  >   row, so they can't be silently conflated — the attribution net catches this class of drift.
+  > - For true reproducibility, pin the base image by digest
+  >   (`IMAGE=ubuntu@sha256:… scripts/provision-build-container.sh`) and snapshot the apt state.
+  >   Not done yet; the honest status is "same recipe, near-identical toolchain, different bytes".
 - Toolchain matching the ROCKNIX target: **glibc 2.41**, meson + ninja, the standard Mesa build
   deps (see Mesa's own `docs/install.rst`).
 - A Mesa checkout at tag `mesa-26.1.6` with the fork patches applied
