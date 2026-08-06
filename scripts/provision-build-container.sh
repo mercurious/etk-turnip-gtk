@@ -75,6 +75,15 @@ PKGS="$(printf '%s' "${PKGS}" | tr -s '[:space:]' ' ')"
 # 1.11.1 from pip at /usr/local/bin/meson. Pin it so a rebuild cannot drift.
 MESON_VERSION="${MESON_VERSION:-1.11.1}"
 
+# The build wrapper is installed INTO the container, not assumed to be there.
+# Until 2026-08-05 /work/build_rocknix.sh existed only inside the laptop's
+# container — the authoritative configure line for every shipped driver, in no
+# repo, one `docker rm` from gone. A freshly provisioned box (etk-cloud) had no
+# way to build at all. Ship it from the repo instead.
+HERE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$HERE_DIR/build_rocknix.sh" ] || { echo "ERROR: missing $HERE_DIR/build_rocknix.sh" >&2; exit 1; }
+BUILD_WRAPPER_B64="$(base64 < "$HERE_DIR/build_rocknix.sh" | tr -d '\n')"
+
 echo ">> Target: ${ETK_BUILD_HOST:-local docker}   container=${CONTAINER}  image=${IMAGE}"
 
 host_sh <<REMOTE
@@ -106,6 +115,12 @@ docker exec "${CONTAINER}" bash -lc '
   # pip on 24.04 is PEP-668 managed; this container is disposable, so the
   # break-system-packages escape is correct rather than a venv indirection.
   pip3 install -q --break-system-packages "meson==${MESON_VERSION}" >/dev/null
+'
+
+echo ">> Installing the build wrapper at /work/build_rocknix.sh"
+docker exec "${CONTAINER}" bash -lc '
+  printf %s "${BUILD_WRAPPER_B64}" | base64 -d > /work/build_rocknix.sh
+  chmod +x /work/build_rocknix.sh
 '
 
 echo ">> Configuring git in the container (git am needs an identity)"
