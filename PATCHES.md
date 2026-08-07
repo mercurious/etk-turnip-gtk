@@ -1,6 +1,8 @@
 # Patch history & decision log
 
-The fork is a short series carried over `mesa-26.1.6` (rebased from `mesa-26.1.3` on 2026-07-30).
+The fork is a short series carried over `mesa-26.2.0` (rebased `mesa-26.1.3` → `mesa-26.1.6` on
+2026-07-30, → `mesa-26.2.0` on 2026-08-07; a sha-pinned `26.3.0-devel` pre-release track rides the
+same series — see the 26.2.0 rebase section).
 This file records **what was tried, what was kept, and what was falsified** — the negative results
 are part of the deliverable, so the dead ends aren't re-walked by anyone reading the source.
 
@@ -290,7 +292,8 @@ doesn't move when upstream adds a flag. All registration lands in patch 0001; no
 Result on `main`: failures went from **4 → 1**, and the survivor is patch 0002 (`ccuhalf`), where
 upstream refactored `emit_rb_ccu_cntl`'s `depth_cache_size` from a literal to
 `cfg->depth_cache_fraction` across three sites. That gear is falsified, so it is dropped on a
-devel base rather than ported.
+devel base rather than ported — mechanized as `SKIP_PATCHES='0002-*'` in
+`prepare-fork-branch.sh apply` since the 26.2.0 rebase.
 
 ### The bug this surfaced: `sddepth` was aliased to an upstream flag on 26.2
 
@@ -360,3 +363,59 @@ Two turnip commits ship in 26.2 but were never backported to 26.1.x. Both are in
   is exactly the lap-4/5 boss regime. **This is testable with instrumentation the fork already
   owns:** `dimlog` prints `tile0=`, `bins=` and `rem=` per framebuffer/gmem-layout, so diffing those
   lines with and without the backport reads directly on whether the ragged bin changes shape.
+
+## Rebase 26.1.6 → 26.2.0, and the devel pre-release track (2026-08-07)
+
+Upstream released `mesa-26.2.0` on 2026-08-05, superseding the `26.2.0-rc3` pre-release base. This
+rebase moves the **stable track to `mesa-26.2.0`**, keeps `mesa-26.1.6` as the fallback stable
+until `26.2.1` (upstream calendar: 2026-08-19), and replaces the rc pre-release with a **sha-pinned
+`26.3.0-devel` track** off main (no rc exists again until `mesa-26.3.0-rc1`, 2026-10-14).
+
+**Measured apply state (the decoupled gtk_0.7 series, regenerated 2026-08-03):**
+
+| Base | Result |
+|---|---|
+| `mesa-26.2.0` (`9f0a761020`) | **8/8, zero fuzz.** 0002 lands on the intended `CCU_CACHE_SIZE_FULL` literal inside `emit_rb_ccu_cntl`'s **A6XX branch — the one an A650 executes** — kept per the all-gears doctrine. |
+| `mesa-26.1.6` | **8/8, zero fuzz** (unchanged; fallback track). |
+| main @ `e40d93a` (26.3.0-devel) | **7/8 with `SKIP_PATCHES='0002-*'`**; 0006's include hunk applies at a 1-line offset. `ccuhalf`/`ccuquarter` stay registered-but-inert (falsified anyway). |
+
+One series artifact was touched to keep the set base-agnostic: **patch 0006's include hunk was
+re-anchored** (insert `util/u_debug.h` before `util/os_time.h`, with `os_time.h` as trailing
+context) because main added `util/ralloc.h` to `tu_query_pool.cc`'s include block, breaking the old
+trailing context. Payload hunks are untouched. Lesson banked: `git apply` only matches a
+no-trailing-context hunk at **EOF**, so a re-anchor must keep at least one trailing context line.
+
+**Upstream delta over the series-touched files** (`git diff --stat mesa-26.1.6 mesa-26.2.0`):
+`tu_cmd_buffer.cc` ±447 · `tu_device.cc` ±394 · `tu_query_pool.cc` ±149 · `tu_query_pool.h` ±6 ·
+`tu_util.cc` ±20 · `tu_util.h` +1 · `vk_fence.{c,h}` **unchanged** (t3devlost's runtime hooks carry
+risk-free).
+
+- **On-path / BASELINE SHIFT — re-baseline before ranking any gear (VALIDATION rule 7).** 26.2
+  reworked CCU sizing into a per-gen gmem-cache config (`fd6_gmem_cache.h`,
+  `cfg->depth_cache_fraction`) — the exact territory of falsified gear 0002. Depth-CCU sizing
+  behavior may have moved; the stock `syncdraw` control must be re-run on 26.2.0 before any gear
+  verdict is compared across the bump.
+- **Now-native:** both 26.1 backports (`a70d2af590db`, `5000d6644db4`) are in 26.2.0 —
+  `patches/backports/26.2/` empty is correct, and patch 0007 (`zlatez`) applies against the native
+  `a70d2af` code.
+- **Not applicable / neutral:** the `tu_device.cc` and `tu_query_pool.cc` churn is init/extension
+  work the series doesn't overlap (patches 0005/0006/0008 applied clean); `tu_util.h`'s single line
+  is upstream's new bit 37 (below).
+- **Bit audit:** upstream max `TU_DEBUG` bit = **37** (`COMPUTE_ROUND_ROBIN`) on both `mesa-26.2.0`
+  and main @ `e40d93a`; ETK occupies 52–63. No collision, 14 bits of gap.
+- **The rc3 track is retired.** The local `mesa-fork-mesa-26.2.0-rc3` checkout was still the
+  **pre-decoupling** tree (no `tu_etk_gears.h`, `sddepth` hard-coded at bit 37) and was deleted;
+  `mesa-fork-mesa-26.2.0` supersedes it. Per the collision section above, any `sddepth` measurement
+  from the shipped `26.2.0-rc3_gtk_0.6` driver stays discarded. Node-side `/work/mesa-26.2.0-rc3`
+  trees get the same treatment (the forge lane independently refuses trees without
+  `tu_etk_gears.h`).
+
+**Operator handoff (rig steps, in order):** forge stages
+`etk_turnip_rocknix_26.2.0_gtk_0.7.so` + `etk_turnip_rocknix_26.3.0-devel-e40d93a_gtk_0.7.so`
+into the `~/etk/drivers/` catalog → operator runs `install.sh` (STEP 6.5 stages the whole catalog;
+the `-devel-` filename is the pre-release gating label) → cold-boot, then the driverInfo gate
+(`Mesa 26.2.0 (git-…) ETK-GTK`) → new build-id invalidates every shader vault, so cold-boot +
+warm-relaunch before any A/B → **rule-7 re-baseline** (stock `syncdraw`, saturated vault, N≥3) on
+26.2.0 before ranking gears. `TURNIP_SO` / `CERTIFIED_BUILDS` move only after rig validation, at
+the next ETK release cut. Diary: 2026-08-19 bump stable to `26.2.1` and drop the 26.1.6 fallback;
+2026-10-14 `mesa-26.3.0-rc1` becomes the rc track.

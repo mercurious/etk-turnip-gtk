@@ -31,9 +31,11 @@ across repeated runs, with the mechanism confirmed from the logs.
    or accept that the campaign only measures the block that shares one.
 7. **Re-baseline after a base bump.** Verdicts are only comparable within one upstream base. The
    26.1.3 → 26.1.6 bump moved the flush baseline (`blit_cache_cleaned` — see
-   [`PATCHES.md`](PATCHES.md)) and the tile-division backport moved the tiling baseline. Re-run the
+   [`PATCHES.md`](PATCHES.md)) and the tile-division backport moved the tiling baseline. The
+   26.1.6 → 26.2.0 bump moved the **depth-CCU sizing baseline** (upstream's per-gen
+   `depth_cache_fraction` gmem-cache rework — exactly gear 0002's territory). Re-run the
    stock `syncdraw` control on the new base **before** ranking any gear against it; comparing a
-   26.1.6 gear to a 26.1.3-era floor is not a measurement.
+   26.2.0 gear to a 26.1.x-era floor is not a measurement.
 
 ## Falsify cheaply before you A/B
 
@@ -76,7 +78,7 @@ question a gear has to answer is whether the FPS it buys is worth that stability
 
 ## Reproducing a comparison
 
-1. Build both `.so` files (stock `mesa-26.1.6` and the fork) — see [`BUILDING.md`](BUILDING.md).
+1. Build both `.so` files (stock `mesa-26.2.0` and the fork) — see [`BUILDING.md`](BUILDING.md).
 2. Stage both under the driver catalog and select via the DRIVER tab; **cold boot** between swaps.
 3. Warm the vault (one launch to menu), then run the fixed race scenario N≥3 per build.
 4. Compare duration / time-to-crash and `ft_jitter_ms`, not pass/fail counts.

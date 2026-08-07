@@ -9,13 +9,14 @@ This is a **downstream fork of Mesa**. Mesa's own license terms govern this sour
   license documentation comes with it — `docs/license.rst` and the `licenses/` directory.
   Do not remove or alter them.
 - **Per-file headers govern each file.** Mesa is predominantly **MIT**-licensed, with some
-  components under other licenses. Every file this fork modifies is MIT upstream (verified against
-  `mesa-26.1.6`):
+  components under other licenses. Every file this fork modifies is MIT upstream, and the one file
+  it adds is MIT too (verified against `mesa-26.2.0`, 2026-08-07):
 
   | File | Copyright | How MIT is declared |
   |------|-----------|---------------------|
   | `src/freedreno/vulkan/tu_cmd_buffer.cc` | © 2016 Red Hat | `SPDX-License-Identifier: MIT` |
   | `src/freedreno/vulkan/tu_device.cc` | © 2016 Red Hat | `SPDX-License-Identifier: MIT` |
+  | `src/freedreno/vulkan/tu_etk_gears.h` **(fork-added)** | © 2026 ETK (Emulation Tuning Kit) | `SPDX-License-Identifier: MIT` |
   | `src/freedreno/vulkan/tu_query_pool.cc` | © 2015 Intel | `SPDX-License-Identifier: MIT` |
   | `src/freedreno/vulkan/tu_query_pool.h` | © 2016 Red Hat | `SPDX-License-Identifier: MIT` |
   | `src/freedreno/vulkan/tu_util.cc` | © 2015 Intel | `SPDX-License-Identifier: MIT` |
@@ -23,11 +24,12 @@ This is a **downstream fork of Mesa**. Mesa's own license terms govern this sour
   | `src/vulkan/runtime/vk_fence.c` | © 2021 Intel | full MIT text, **no SPDX tag** |
   | `src/vulkan/runtime/vk_fence.h` | © 2021 Intel | full MIT text, **no SPDX tag** |
 
-  This fork preserves those headers unchanged and adds no conflicting blanket claim. Note the last
-  two: they are MIT by full boilerplate rather than an SPDX identifier, so a `grep SPDX` sweep alone
-  will not find their license — check the header text.
+  This fork preserves upstream headers unchanged and adds no conflicting blanket claim.
+  `tu_etk_gears.h` is the fork's one **added** file (the gear registry, patch 0001) and declares
+  MIT itself. Note the last two rows: they are MIT by full boilerplate rather than an SPDX
+  identifier, so a `grep SPDX` sweep alone will not find their license — check the header text.
 
-> That list is the complete fork delta (see `git log mesa-26.1.6..` on a branch built by
+> That list is the complete fork delta (see `git log mesa-26.2.0..` on a branch built by
 > `scripts/prepare-fork-branch.sh`). If you extend it to other files, re-check their headers — both
 > `grep -n SPDX-License-Identifier <file>` *and* the comment block at the top — and keep them intact.
 

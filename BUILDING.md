@@ -42,7 +42,7 @@ of scope here.)
   >   Not done yet; the honest status is "same recipe, near-identical toolchain, different bytes".
 - Toolchain matching the ROCKNIX target: **glibc 2.41**, meson + ninja, the standard Mesa build
   deps (see Mesa's own `docs/install.rst`).
-- A Mesa checkout at tag `mesa-26.1.6` with the fork patches applied
+- A Mesa checkout at tag `mesa-26.2.0` with the fork patches applied
   (see [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh)).
 - **`git` on `PATH` at build time.** Mesa generates `git_sha1.h` from the checkout; without it
   `MESA_GIT_SHA1` is empty and the build loses its per-build identity (see *Identifying a build*).
@@ -53,30 +53,37 @@ of scope here.)
 ./scripts/prepare-fork-branch.sh apply
 ```
 
-That clones upstream at the base tag, applies the line's backports, then the fork series. To build a
-**pre-release** driver instead — the point of the second track, so Pitstop can A/B stable against
-experimental:
+That clones upstream at the base tag (default `mesa-26.2.0`), applies the line's backports, then
+the fork series. The **fallback stable** (kept until `26.2.1`, due 2026-08-19) is the same command
+on the previous tag:
 
 ```bash
-BASE_TAG=mesa-26.2.0-rc3 FORK_BRANCH=etk-gtk-26.2 ./scripts/prepare-fork-branch.sh apply
+BASE_TAG=mesa-26.1.6 ./scripts/prepare-fork-branch.sh apply
 ```
 
-`BASE_TAG` accepts a release tag, an rc tag, a stable branch (`26.2`), `main`, or a **commit sha**.
+`BASE_TAG` accepts a release tag, an rc tag, a stable branch (`26.2`), or a **commit sha**.
 For a moving branch, add `REUSE=1` to re-pull an existing checkout in place. The backport set is
 chosen automatically from the base — `patches/backports/26.1/` for the 26.1 line, nothing for 26.2
-(which carries those commits natively). Verified clean on `mesa-26.1.6` and `mesa-26.2.0-rc3`.
+or newer (they carry those commits natively). Verified clean on `mesa-26.2.0` (8/8), `mesa-26.1.6`
+(8/8) and main @ `e40d93a` (7/8, `SKIP_PATCHES='0002-*'`) on 2026-08-07.
 
 ### Devel-branch builds must be pinned by sha, not tracked by name
 
+This is the **pre-release track** while no upstream rc exists (`mesa-26.3.0-rc1` is scheduled
+2026-10-14 and will slot into the same mechanism as a plain rc-tag apply):
+
 ```bash
-BASE_TAG=84acd8488ad671d17bcdaf432b01a2e06db34fb3 FORK_BRANCH=etk-gtk-devel \
-  ./scripts/prepare-fork-branch.sh apply
+MAIN_SHA=$(git ls-remote https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main | cut -f1)
+BASE_TAG=$MAIN_SHA SKIP_PATCHES='0002-*' \
+  WORKDIR=$PWD/mesa-fork-26.3.0-devel-${MAIN_SHA:0:7} ./scripts/prepare-fork-branch.sh apply
 ```
 
 `main` is a **position, not a version**. Two builds a week apart both report `26.3.0-devel` and are
 different drivers — so a branch-tracked build puts a name in the ledger that cannot identify what
 ran, defeating stack attribution. Pin the sha and carry it in the artifact name
-(`…26.3.0-devel-84acd84_gtk_0.x.so`).
+(`…26.3.0-devel-e40d93a_gtk_0.x.so`). `SKIP_PATCHES='0002-*'` is required on main: upstream's
+`depth_cache_fraction` rework removed patch 0002's context; its `ccuhalf`/`ccuquarter` gears stay
+registered (patch 0001's `tu_etk_gears.h` registry) and are simply inert — falsified anyway.
 
 > **Naming, because the community convention is misleading.** Android adrenotools packages (e.g.
 > `Turnip_v26.3.0-Rn`) are named after `main`'s in-progress VERSION string, so "v26.3.0" means
@@ -106,15 +113,23 @@ meson setup build-rocknix \
   and the `glx/egl/gbm/llvm=disabled` set exist for the same reason: drop dependencies the Vulkan
   driver never links.
 - This matches `/work/build_rocknix.sh` in the reference container, which is the authoritative
-  configure line. Verified against `mesa-26.1.6` and `mesa-26.2.0-rc3` on 2026-07-30.
+  configure line. Verified against `mesa-26.2.0` and `26.3.0-devel` @ `e40d93a` on 2026-08-07
+  (previously `mesa-26.1.6` and `mesa-26.2.0-rc3` on 2026-07-30).
 
 ## Build
 
 Full build (reference container wrapper):
 
 ```bash
-docker exec turnip-rocknix bash -lc 'MESA_VER=26.1.6 /work/build_rocknix.sh'
+docker exec turnip-rocknix bash -lc 'MESA_VER=26.2.0 /work/build_rocknix.sh'
 ```
+
+For fleet builds, this wrapper is conducted by **`~/etk/forge.sh turnip`** (the ETK mother repo):
+one build per version in `FORGE_TURNIP_VERS`, run detached on `etk-cloud`, gated on the `ETK-GTK`
+version string + embedded-git == tree HEAD + unstripped size, and staged into `~/etk/drivers/` as
+`etk_turnip_rocknix_<ver>_gtk_<gen>.so` with a sha256 sidecar. Its lane refuses a tree without
+`tu_etk_gears.h` (a pre-decoupling tree is the shipped bit-collision build). Prepare the node trees
+at `/work/mesa-<ver>` with `prepare-fork-branch.sh apply` first.
 
 Incremental rebuild — **use this in the iterate loop**, a full `rm -rf build-rocknix` is far slower:
 
@@ -146,7 +161,7 @@ Patch #8 makes the driver self-identifying, so a build is attributable at runtim
 
 ```bash
 vulkaninfo | grep driverInfo
-#   driverInfo = Mesa 26.1.6 (git-1a2b3c4d5e) ETK-GTK
+#   driverInfo = Mesa 26.2.0 (git-1a2b3c4d5e) ETK-GTK
 ```
 
 The `git-…` component is the fork branch's HEAD, so it differs per series build; the `ETK-GTK`
@@ -165,12 +180,18 @@ it reports the same string and is indistinguishable from the next.
 **Use `prepare-fork-branch.sh apply`**, which always produces a git checkout, and keep `git` on
 `PATH` in the build environment.
 
-Stage artifacts with the base and sha in the filename so the DRIVER tab can tell them apart:
+Stage artifacts with the base and sha in the filename so the DRIVER tab can tell them apart.
+The raw build output is named `libvulkan_freedreno-rocknix-<ver>.so`; the shipped catalog name
+(what `~/etk/drivers/` and the DRIVER tab carry) is `etk_turnip_rocknix_<ver>_gtk_<gen>.so`:
 
 ```
-libvulkan_freedreno-rocknix-26.1.6-etk-g<sha>.so
-libvulkan_freedreno-rocknix-26.2.0-rc3-etk-g<sha>.so
+libvulkan_freedreno-rocknix-26.2.0-etk-g<sha>.so              # manual staging
+etk_turnip_rocknix_26.2.0_gtk_0.7.so                          # forge/catalog name
+etk_turnip_rocknix_26.3.0-devel-e40d93a_gtk_0.7.so            # devel carries the base pin
 ```
+
+The ICD json's `api_version` is derived at build time from the tree's own `VK_HEADER_VERSION`
+(it was a hardcoded constant once, and shipped stale).
 
 ## Selecting the driver on the rig
 
