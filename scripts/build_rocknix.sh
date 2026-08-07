@@ -7,7 +7,7 @@
 # MUST be validated by actually loading on a COLD-booted rig (always-reboot doctrine).
 set -euo pipefail
 
-MESA_VER="${MESA_VER:-26.1.3}"
+MESA_VER="${MESA_VER:-26.2.0}"
 JOBS="${JOBS:-4}"
 WORK=/work
 cd "$WORK"
@@ -19,6 +19,11 @@ if [ ! -d "$WORK/mesa-$MESA_VER" ]; then
   tar -xf mesa.tar.xz && rm -f mesa.tar.xz
 fi
 cd "$WORK/mesa-$MESA_VER"
+
+# A non-git tree (the tarball fallback above) builds with an EMPTY MESA_GIT_SHA1:
+# driverInfo loses its (git-<sha>) and the build can't be attributed — use
+# prepare-fork-branch.sh apply to make a real checkout instead.
+[ -d .git ] || echo ">> WARNING: mesa-$MESA_VER is not a git checkout — MESA_GIT_SHA1 will be empty, breaking build attribution"
 
 # --- configure: Vulkan-only freedreno, msm kmd, wayland+x11 WSI ---
 rm -rf build-rocknix
@@ -42,12 +47,16 @@ cp build-rocknix/src/freedreno/vulkan/libvulkan_freedreno.so "$RAW"
 cp "$RAW" "$STRIPPED"; strip "$STRIPPED"
 
 # --- ICD JSON for /storage override on the rig (VK_DRIVER_FILES points here) ---
+# api_version is derived from the tree's own vendored Vulkan header. It used to be
+# a hardcoded constant, which shipped stale (1.4.303 while 26.1.6 was 1.4.354).
+VK_HDR=$(awk '/^#define VK_HEADER_VERSION /{print $3}' include/vulkan/vulkan_core.h)
+[ -n "$VK_HDR" ] || { echo "ERROR: could not derive VK_HEADER_VERSION from include/vulkan/vulkan_core.h"; exit 1; }
 cat > "$OUT/freedreno_icd.rocknix.json" <<JSON
 {
     "file_format_version": "1.0.0",
     "ICD": {
         "library_path": "/storage/turnip/libvulkan_freedreno.so",
-        "api_version": "1.4.303"
+        "api_version": "1.4.$VK_HDR"
     }
 }
 JSON

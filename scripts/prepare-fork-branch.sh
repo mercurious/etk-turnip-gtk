@@ -13,9 +13,10 @@
 #
 # Two kinds of patch live under ./patches/:
 #
-#   patches/*.patch              the fork series — base-agnostic. Verified to apply
-#                                cleanly to 26.1.3, 26.1.6 and 26.2.0-rc3 with zero
-#                                fuzz, so it is deliberately NOT duplicated per base;
+#   patches/*.patch              the fork series — base-agnostic. Measured 2026-08-07:
+#                                8/8 zero fuzz on mesa-26.2.0 and mesa-26.1.6; 7/8 on
+#                                main (SKIP_PATCHES='0002-*' — upstream refactored 0002's
+#                                context away). Deliberately NOT duplicated per base;
 #                                split it only when it actually has to diverge.
 #   patches/backports/<line>/    upstream commits pulled back to an older base.
 #                                Base-specific by nature: 26.1/ carries two turnip
@@ -47,8 +48,7 @@ set -euo pipefail
 
 # ---- Config (override via environment) --------------------------------------
 UPSTREAM_URL="${UPSTREAM_URL:-https://gitlab.freedesktop.org/mesa/mesa.git}"
-BASE_TAG="${BASE_TAG:-mesa-26.1.6}"
-FORK_BRANCH="${FORK_BRANCH:-etk-gtk}"
+BASE_TAG="${BASE_TAG:-mesa-26.2.0}"
 WORKDIR_EXPLICIT="${WORKDIR:+1}"
 WORKDIR="${WORKDIR:-$(pwd)/mesa-fork-${BASE_TAG}}"
 PATCH_DIR="${PATCH_DIR:-$(cd "$(dirname "$0")/.." && pwd)/patches}"
@@ -62,6 +62,19 @@ if [[ -z "${BASE_LINE:-}" && "${BASE_TAG}" =~ ^[0-9a-f]{7,40}$ ]]; then
 fi
 BASE_LINE="${BASE_LINE:-$(printf '%s' "${BASE_TAG}" | sed -E 's/^mesa-//; s/^([0-9]+\.[0-9]+).*/\1/')}"
 BACKPORT_DIR="${BACKPORT_DIR:-${PATCH_DIR}/backports/${BASE_LINE}}"
+
+# Fork branch defaults to the line it sits on (etk-gtk-26.2; a sha pin — line
+# "main" — becomes etk-gtk-devel). The old static default `etk-gtk` matched no
+# checkout ever actually produced; every invocation overrode it.
+FORK_BRANCH="${FORK_BRANCH:-etk-gtk-$([[ "${BASE_LINE}" == main ]] && echo devel || echo "${BASE_LINE}")}"
+
+# Patches to withhold from `apply`: space-separated basename globs, e.g.
+# SKIP_PATCHES='0002-*'. For a base where upstream refactored the code out from
+# under a falsified patch (0002 vs the depth_cache_fraction rework), skipping is
+# the supported path: the gears stay REGISTERED via patch 0001's tu_etk_gears.h
+# registry and are simply inert with no implementation behind them — the
+# decoupling (d6970b9) exists for exactly this.
+SKIP_PATCHES="${SKIP_PATCHES:-}"
 
 # Moving refs (branches like 26.2 or main) are meant to be re-pulled. Set REUSE=1 to
 # fetch+reset an existing WORKDIR in place instead of refusing to touch it.
@@ -101,19 +114,22 @@ Usage: $0 <build|apply>
           ${BASE_TAG} clone. Needs only network.
 
           Stable:      $0 apply
-          Pre-release: BASE_TAG=mesa-26.2.0-rc3 FORK_BRANCH=etk-gtk-26.2 $0 apply
+          Fallback:    BASE_TAG=mesa-26.1.6 $0 apply
           Branch tip:  BASE_TAG=26.2 REUSE=1 $0 apply
-          Devel pin:   BASE_TAG=<40-hex-sha> FORK_BRANCH=etk-gtk-devel $0 apply
+          Devel pin:   BASE_TAG=<40-hex-sha> SKIP_PATCHES='0002-*' $0 apply
                        (pin main by SHA, never by branch name — "main" is a
                         position, not a version, so a branch-tracked build
-                        cannot be identified after the fact)
+                        cannot be identified after the fact; 0002 no longer
+                        applies past upstream's depth_cache_fraction rework)
+          RC track:    BASE_TAG=mesa-26.3.0-rc1 $0 apply
+                       (when upstream cuts it — scheduled 2026-10-14)
 
 Current base : ${BASE_TAG}  (line ${BASE_LINE})
 Backports    : ${BACKPORT_DIR}
 Fork series  : ${PATCH_DIR}
 
 Overrides: UPSTREAM_URL BASE_TAG BASE_LINE BACKPORT_DIR FORK_BRANCH WORKDIR PATCH_DIR
-           REUSE BUILD_BASE_TAG FORK_TREE FORK_DOCKER FORK_BASE FORK_HEAD IMPORT_MSG
+           SKIP_PATCHES REUSE BUILD_BASE_TAG FORK_TREE FORK_DOCKER FORK_BASE FORK_HEAD IMPORT_MSG
 EOF
 }
 
@@ -293,7 +309,21 @@ apply_series() {
   clone_upstream
   apply_backports
   echo ">> Applying committed fork series from ${PATCH_DIR}"
-  git -C "${WORKDIR}" am --keep-non-patch "${PATCH_DIR}"/*.patch
+  local series=() p b g skip
+  for p in "${PATCH_DIR}"/*.patch; do
+    b="$(basename "$p")" skip=0
+    for g in ${SKIP_PATCHES}; do
+      # shellcheck disable=SC2254  # unquoted on purpose: $g is a glob
+      case "$b" in $g) skip=1 ;; esac
+    done
+    if [[ "${skip}" == 1 ]]; then
+      echo "   >> SKIPPING ${b} (SKIP_PATCHES) — its gears stay registered but inert"
+    else
+      series+=("$p")
+    fi
+  done
+  [[ ${#series[@]} -gt 0 ]] || { echo "ERROR: SKIP_PATCHES filtered out the entire series." >&2; exit 1; }
+  git -C "${WORKDIR}" am --keep-non-patch "${series[@]}"
   echo
   echo ">> Done. Delta over ${BASE_TAG} (${BASE_SHA:0:10}):"
   git -C "${WORKDIR}" --no-pager log --oneline "${BASE_SHA}..${FORK_BRANCH}"

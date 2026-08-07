@@ -40,14 +40,11 @@ diff --git a/src/freedreno/vulkan/tu_query_pool.cc b/src/freedreno/vulkan/tu_que
 index 6d3ea7d..c54f80f 100644
 --- a/src/freedreno/vulkan/tu_query_pool.cc
 +++ b/src/freedreno/vulkan/tu_query_pool.cc
-@@ -12,6 +12,7 @@
+@@ -12,3 +12,4 @@
  
  #include "nir/nir_builder.h"
- #include "util/os_time.h"
 +#include "util/u_debug.h"
- #include "vk_acceleration_structure.h"
- #include "vk_util.h"
- 
+ #include "util/os_time.h"
 @@ -584,17 +585,48 @@ emit_counter_barrier(struct tu_cs *cs)
   * in practice (fork-local pragmatism; reset on every available query). */
  static uint32_t etk_wait_timeout_strikes = 0;
