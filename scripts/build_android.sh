@@ -45,18 +45,53 @@ CC_BIN="$NDKBIN/aarch64-linux-android$API-clang"
 CXX_BIN="$NDKBIN/aarch64-linux-android$API-clang++"
 [ -x "$CC_BIN" ] || { echo "ERROR: $CC_BIN missing — API $API not provided by this NDK"; exit 1; }
 
-# --- Mesa source ---
-if [ ! -d "$WORK/mesa-$MESA_VER" ]; then
-  echo ">> downloading mesa $MESA_VER tarball"
-  curl -fL --retry 3 -o mesa.tar.xz "https://archive.mesa3d.org/mesa-$MESA_VER.tar.xz"
-  tar -xf mesa.tar.xz && rm -f mesa.tar.xz
-fi
-cd "$WORK/mesa-$MESA_VER"
+# --- Mesa source: TARBALL (stable) or GIT (pre-release) --------------------
+# MESA_REF set  -> devel track: clone Mesa main and build a PINNED commit.
+# MESA_REF unset-> stable track: the released tarball for MESA_VER.
+#
+# The devel track exists because the Android Turnip scene ships almost entirely
+# from Mesa main, and does it opaquely — a driver named after its author with no
+# way to learn what source produced it. A pinned sha, embedded in the binary and
+# printed in the package, is the whole differentiator. Anyone can rebuild ours.
+MESA_REF="${MESA_REF:-}"
+MESA_GIT_URL="${MESA_GIT_URL:-https://gitlab.freedesktop.org/mesa/mesa.git}"
+MESA_SHA=""
+TRACK="stable"
 
-# Same attribution caveat as the ROCKNIX lane: a tarball tree has no git sha, so
-# driverInfo loses its (git-<sha>). Stock Android builds ship from the tarball
-# deliberately — the version string still carries the Mesa release number.
-[ -d .git ] || echo ">> note: tarball tree (no .git) — MESA_GIT_SHA1 empty, as with the shipped 26.1.3"
+if [ -n "$MESA_REF" ]; then
+  TRACK="devel"
+  SRCDIR="$WORK/mesa-git"
+  if [ ! -d "$SRCDIR/.git" ]; then
+    echo ">> cloning mesa main (once; ~1.5 GB)"
+    git clone --filter=blob:none "$MESA_GIT_URL" "$SRCDIR"
+  fi
+  cd "$SRCDIR"
+  echo ">> fetching + pinning $MESA_REF"
+  git fetch -q --all --tags
+  git checkout -q --detach "$MESA_REF" 2>/dev/null || git checkout -q --detach "origin/$MESA_REF"
+  git reset -q --hard
+  MESA_SHA=$(git rev-parse --short=9 HEAD)
+  # Keep the FULL sha for the attribution gate. Mesa embeds its own abbreviation
+  # (10 chars, not ours), so the only safe comparison is "is the embedded value
+  # a prefix of the full commit id" — comparing two different abbreviations can
+  # never match and fails a correct build.
+  MESA_FULLSHA=$(git rev-parse HEAD)
+  # Mesa's VERSION file is the authority for what main currently calls itself
+  # (e.g. 26.3.0-devel). Never guess it from the branch name.
+  MESA_VER=$(tr -d ' \n' < VERSION)
+  echo ">> devel track: mesa $MESA_VER @ $MESA_SHA"
+else
+  if [ ! -d "$WORK/mesa-$MESA_VER" ]; then
+    echo ">> downloading mesa $MESA_VER tarball"
+    curl -fL --retry 3 -o mesa.tar.xz "https://archive.mesa3d.org/mesa-$MESA_VER.tar.xz"
+    tar -xf mesa.tar.xz && rm -f mesa.tar.xz
+  fi
+  cd "$WORK/mesa-$MESA_VER"
+  # Attribution caveat, same as the ROCKNIX lane: a tarball tree has no git sha,
+  # so the version string carries the release number and no (git-<sha>). That is
+  # correct for a stable build — the release number IS the identity.
+  [ -d .git ] || echo ">> note: tarball tree (no .git) — MESA_GIT_SHA1 empty, as with the shipped 26.1.3"
+fi
 
 # --- meson cross file ------------------------------------------------------
 # pkg_config_libdir points at an EMPTY directory on purpose. Without it, meson
@@ -103,8 +138,9 @@ echo ">> cross file: $CROSS"
 # android-stub synthesizes the Android framework libs (libcutils, libhardware,
 # libnativewindow, liblog) so no AOSP tree is needed; the real ones are resolved
 # on-device at load time.
-rm -rf build-android
-meson setup build-android \
+BUILDDIR="build-android"
+rm -rf "$BUILDDIR"
+meson setup "$BUILDDIR" \
   --cross-file "$CROSS" \
   -Dbuildtype=release \
   -Dplatforms=android \
@@ -118,12 +154,26 @@ meson setup build-android \
   -Dcpp_rtti=false \
   -Db_lto=false -Dstrip=false
 
-ninja -C build-android -j"$JOBS" src/freedreno/vulkan/libvulkan_freedreno.so
+ninja -C "$BUILDDIR" -j"$JOBS" src/freedreno/vulkan/libvulkan_freedreno.so
 
 # --- versioned outputs -----------------------------------------------------
+# VERLABEL is the ONE identity string: it names the file, the package, and what
+# the user sees in the driver picker, so those can never disagree. A devel build
+# carries its pinned sha in the label — that is the promise the scene does not
+# make ("T28-toasted" identifies nothing you can check).
+if [ "$TRACK" = devel ]; then
+    VERLABEL="$MESA_VER-$MESA_SHA"
+    DISPLAY_NAME="ETK Turnip $MESA_VER ($MESA_SHA)"
+    TRACK_BLURB="Pre-release: built from Mesa's development branch at commit $MESA_SHA. Newer fixes, less testing."
+else
+    VERLABEL="$MESA_VER"
+    DISPLAY_NAME="ETK Turnip $MESA_VER"
+    TRACK_BLURB="Stable: built from the official Mesa $MESA_VER release."
+fi
+
 mkdir -p "$OUT"
-RAW="$OUT/libvulkan_freedreno-android-$MESA_VER.so"
-cp build-android/src/freedreno/vulkan/libvulkan_freedreno.so "$RAW"
+RAW="$OUT/libvulkan_freedreno-android-$VERLABEL.so"
+cp "$BUILDDIR/src/freedreno/vulkan/libvulkan_freedreno.so" "$RAW"
 
 # The SHIPPED package carries a STRIPPED .so (14,394,560 B for 26.1.3). Strip
 # with the NDK's llvm-strip, not the host binutils strip — a host strip on a
@@ -137,21 +187,24 @@ cp "$RAW" "$PKGSO"
 # Our naming stays version-only (law #8) — the scene's convention of nicknaming
 # builds after their author is exactly what makes "which turnip should I use"
 # unanswerable.
+# `name` is the ONLY line most users ever read — it is what the driver picker
+# shows. It must say which build this is without jargon, because the alternative
+# is a list of nicknames the user cannot rank.
 cat > "$OUT/meta.json" <<METAEOF
 {
   "schemaVersion": 1,
-  "name": "ETK Turnip $MESA_VER (Stage IV base)",
-  "description": "Mesa Turnip a6xx Vulkan driver for Adreno 650 / SM8250 — ETK Stage IV fork base.",
-  "author": "Mesa / ETK",
-  "packageVersion": "$MESA_VER",
+  "name": "$DISPLAY_NAME",
+  "description": "$TRACK_BLURB Tested on Adreno 650 (Snapdragon 865/870). Other Adreno 6xx/7xx should work but are untested. Full details: github.com/mercurious/etk-turnip-gtk",
+  "author": "Mesa / mercurious",
+  "packageVersion": "$VERLABEL",
   "vendor": "Mesa",
-  "driverVersion": "$MESA_VER",
+  "driverVersion": "$VERLABEL",
   "minApi": $API,
   "libraryName": "libvulkan_freedreno.so"
 }
 METAEOF
 
-ADPKG="$OUT/etk-turnip-$MESA_VER-android.adpkg.zip"
+ADPKG="$OUT/etk-turnip-$VERLABEL-android.adpkg.zip"
 rm -f "$ADPKG"
 ( cd "$OUT" && zip -q -X "$ADPKG" libvulkan_freedreno.so meta.json )
 
@@ -160,7 +213,7 @@ rm -f "$ADPKG"
 # device does not have, fails at runtime with no useful message. Check here.
 # ==========================================================
 echo
-echo ">> BUILT ANDROID $MESA_VER"
+echo ">> BUILT ANDROID $VERLABEL ($TRACK track)"
 ls -la "$RAW" "$PKGSO" "$ADPKG"
 file "$PKGSO"
 
@@ -198,8 +251,22 @@ if readelf -d "$PKGSO" | grep -q 'libc++_shared\.so'; then
 fi
 
 echo ">> embedded version string:"
-strings "$PKGSO" | grep -oE "Mesa $MESA_VER[^\"]*" | head -1 \
-    || { echo "!!! no 'Mesa $MESA_VER' string — built from the wrong tree?"; exit 1; }
+VSTR=$(strings "$PKGSO" | grep -oE "Mesa $MESA_VER[^\"]*" | head -1)
+[ -n "$VSTR" ] || { echo "!!! no 'Mesa $MESA_VER' string — built from the wrong tree?"; exit 1; }
+echo "   $VSTR"
+
+# On the devel track the embedded sha must match the commit we pinned. This is
+# the ROCKNIX lane's law ("proof the artifact came from the tree you think it
+# did") and it is the entire basis of the claim that our pre-releases are
+# auditable: a user can read the sha off the driver and diff it themselves.
+if [ "$TRACK" = devel ]; then
+    EMBED=$(printf '%s' "$VSTR" | sed -n 's/.*git-\([0-9a-f]*\).*/\1/p')
+    [ -n "$EMBED" ] || { echo "!!! devel build carries no git- sha in its version string"; exit 1; }
+    case "$MESA_FULLSHA" in
+        "$EMBED"*) echo "   embedded git-$EMBED is a prefix of pinned $MESA_FULLSHA" ;;
+        *) echo "!!! embedded git-$EMBED is NOT a prefix of pinned $MESA_FULLSHA — built from a different tree"; exit 1 ;;
+    esac
+fi
 
 echo ">> package contents:"
 unzip -l "$ADPKG"
