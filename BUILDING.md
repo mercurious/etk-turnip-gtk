@@ -42,7 +42,7 @@ of scope here.)
   >   Not done yet; the honest status is "same recipe, near-identical toolchain, different bytes".
 - Toolchain matching the ROCKNIX target: **glibc 2.41**, meson + ninja, the standard Mesa build
   deps (see Mesa's own `docs/install.rst`).
-- A Mesa checkout at tag `mesa-26.2.0` with the fork patches applied
+- A Mesa checkout at tag `mesa-26.2.1` with the fork patches applied
   (see [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh)).
 - **`git` on `PATH` at build time.** Mesa generates `git_sha1.h` from the checkout; without it
   `MESA_GIT_SHA1` is empty and the build loses its per-build identity (see *Identifying a build*).
@@ -53,9 +53,9 @@ of scope here.)
 ./scripts/prepare-fork-branch.sh apply
 ```
 
-That clones upstream at the base tag (default `mesa-26.2.0`), applies the line's backports, then
-the fork series. The **fallback stable** (kept until `26.2.1`, due 2026-08-19) is the same command
-on the previous tag:
+That clones upstream at the base tag (default `mesa-26.2.1`), applies the line's backports, then
+the fork series. The **fallback stable** (the 26.1 series is EOL upstream; this track is frozen)
+is the same command on the previous line's last tag:
 
 ```bash
 BASE_TAG=mesa-26.1.6 ./scripts/prepare-fork-branch.sh apply
@@ -64,8 +64,9 @@ BASE_TAG=mesa-26.1.6 ./scripts/prepare-fork-branch.sh apply
 `BASE_TAG` accepts a release tag, an rc tag, a stable branch (`26.2`), or a **commit sha**.
 For a moving branch, add `REUSE=1` to re-pull an existing checkout in place. The backport set is
 chosen automatically from the base — `patches/backports/26.1/` for the 26.1 line, nothing for 26.2
-or newer (they carry those commits natively). Verified clean on `mesa-26.2.0` (8/8), `mesa-26.1.6`
-(8/8) and main @ `e40d93a` (7/8, `SKIP_PATCHES='0002-*'`) on 2026-08-07.
+or newer (they carry those commits natively). Verified clean on `mesa-26.2.1` (8/8) and
+main @ `d2e56df` (7/8, `SKIP_PATCHES='0002-*'`) on 2026-08-21; previously `mesa-26.2.0` and
+`mesa-26.1.6` (both 8/8) and main @ `e40d93a` on 2026-08-07.
 
 ### Devel-branch builds must be pinned by sha, not tracked by name
 
@@ -121,7 +122,7 @@ meson setup build-rocknix \
 Full build (reference container wrapper):
 
 ```bash
-docker exec turnip-rocknix bash -lc 'MESA_VER=26.2.0 /work/build_rocknix.sh'
+docker exec turnip-rocknix bash -lc 'MESA_VER=26.2.1 /work/build_rocknix.sh'
 ```
 
 For fleet builds, this wrapper is conducted by **`~/etk/forge.sh turnip`** (the ETK mother repo):

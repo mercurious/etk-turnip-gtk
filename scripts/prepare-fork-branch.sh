@@ -13,11 +13,12 @@
 #
 # Two kinds of patch live under ./patches/:
 #
-#   patches/*.patch              the fork series — base-agnostic. Measured 2026-08-07:
-#                                8/8 zero fuzz on mesa-26.2.0 and mesa-26.1.6; 7/8 on
-#                                main (SKIP_PATCHES='0002-*' — upstream refactored 0002's
-#                                context away). Deliberately NOT duplicated per base;
-#                                split it only when it actually has to diverge.
+#   patches/*.patch              the fork series — base-agnostic. Measured 2026-08-21:
+#                                8/8 zero fuzz on mesa-26.2.1 (also 26.2.0/26.1.6 on
+#                                2026-08-07); 7/8 on main @ d2e56df (SKIP_PATCHES='0002-*'
+#                                — upstream refactored 0002's context away; still true at
+#                                this pin). Deliberately NOT duplicated per base; split it
+#                                only when it actually has to diverge.
 #   patches/backports/<line>/    upstream commits pulled back to an older base.
 #                                Base-specific by nature: 26.1/ carries two turnip
 #                                commits that 26.2 already contains natively, so
@@ -48,7 +49,7 @@ set -euo pipefail
 
 # ---- Config (override via environment) --------------------------------------
 UPSTREAM_URL="${UPSTREAM_URL:-https://gitlab.freedesktop.org/mesa/mesa.git}"
-BASE_TAG="${BASE_TAG:-mesa-26.2.0}"
+BASE_TAG="${BASE_TAG:-mesa-26.2.1}"
 WORKDIR_EXPLICIT="${WORKDIR:+1}"
 WORKDIR="${WORKDIR:-$(pwd)/mesa-fork-${BASE_TAG}}"
 PATCH_DIR="${PATCH_DIR:-$(cd "$(dirname "$0")/.." && pwd)/patches}"
