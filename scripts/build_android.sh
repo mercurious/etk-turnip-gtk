@@ -19,7 +19,7 @@
 # never by the gates alone.
 set -euo pipefail
 
-MESA_VER="${MESA_VER:-26.2.0}"
+MESA_VER="${MESA_VER:-26.2.1}"   # stable-track default — keep in lockstep with prepare-fork-branch.sh BASE_TAG
 JOBS="${JOBS:-4}"
 API="${API:-26}"                 # matches the shipped package's minApi
 NDK="${NDK:-/ndk}"
