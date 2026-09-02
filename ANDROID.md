@@ -13,10 +13,10 @@ more frames, fewer glitches, or a game booting that didn't before.
 
 | File name looks like | What it is | Use it if |
 |---|---|---|
-| `etk-turnip-26.2.1-android.adpkg.zip` | **Stable.** Built from an official Mesa release. | You want it to just work. **Start here.** |
+| `etk-turnip-26.2.2-android.adpkg.zip` | **Stable.** Built from an official Mesa release. | You want it to just work. **Start here.** |
 | `etk-turnip-26.3.0-devel-a1b2c3d4e-android.adpkg.zip` | **Pre-release.** Built from Mesa's in-progress code, frozen at one exact point. | Stable has a bug you're hoping is fixed, or you like being early. |
 
-The number (`26.2.1`) is the Mesa version — bigger is newer. The letters and
+The number (`26.2.2`) is the Mesa version — bigger is newer. The letters and
 digits on a pre-release (`a1b2c3d4e`) identify the exact snapshot of Mesa's code
 it was built from. That's there so anyone can check what they're running and
 rebuild it themselves. It isn't a nickname.
