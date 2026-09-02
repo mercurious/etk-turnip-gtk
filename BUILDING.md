@@ -42,7 +42,7 @@ of scope here.)
   >   Not done yet; the honest status is "same recipe, near-identical toolchain, different bytes".
 - Toolchain matching the ROCKNIX target: **glibc 2.41**, meson + ninja, the standard Mesa build
   deps (see Mesa's own `docs/install.rst`).
-- A Mesa checkout at tag `mesa-26.2.1` with the fork patches applied
+- A Mesa checkout at tag `mesa-26.2.2` with the fork patches applied
   (see [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh)).
 - **`git` on `PATH` at build time.** Mesa generates `git_sha1.h` from the checkout; without it
   `MESA_GIT_SHA1` is empty and the build loses its per-build identity (see *Identifying a build*).
@@ -53,7 +53,7 @@ of scope here.)
 ./scripts/prepare-fork-branch.sh apply
 ```
 
-That clones upstream at the base tag (default `mesa-26.2.1`), applies the line's backports, then
+That clones upstream at the base tag (default `mesa-26.2.2`), applies the line's backports, then
 the fork series. The **fallback stable** (the 26.1 series is EOL upstream; this track is frozen)
 is the same command on the previous line's last tag:
 
@@ -64,9 +64,10 @@ BASE_TAG=mesa-26.1.6 ./scripts/prepare-fork-branch.sh apply
 `BASE_TAG` accepts a release tag, an rc tag, a stable branch (`26.2`), or a **commit sha**.
 For a moving branch, add `REUSE=1` to re-pull an existing checkout in place. The backport set is
 chosen automatically from the base — `patches/backports/26.1/` for the 26.1 line, nothing for 26.2
-or newer (they carry those commits natively). Verified clean on `mesa-26.2.1` (8/8) and
-main @ `d2e56df` (7/8, `SKIP_PATCHES='0002-*'`) on 2026-08-21; previously `mesa-26.2.0` and
-`mesa-26.1.6` (both 8/8) and main @ `e40d93a` on 2026-08-07.
+or newer (they carry those commits natively). Verified clean on `mesa-26.2.2` (8/8) and
+main @ `c0682c54` (5/8, `SKIP_PATCHES='0002-* 0003-* 0004-*'`) on 2026-09-02; previously `mesa-26.2.1`
+(8/8) and main @ `d2e56df` (7/8) on 2026-08-21, and `mesa-26.2.0`/`mesa-26.1.6` (both 8/8) and
+main @ `e40d93a` on 2026-08-07.
 
 ### Devel-branch builds must be pinned by sha, not tracked by name
 
@@ -75,16 +76,19 @@ This is the **pre-release track** while no upstream rc exists (`mesa-26.3.0-rc1`
 
 ```bash
 MAIN_SHA=$(git ls-remote https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main | cut -f1)
-BASE_TAG=$MAIN_SHA SKIP_PATCHES='0002-*' \
-  WORKDIR=$PWD/mesa-fork-26.3.0-devel-${MAIN_SHA:0:7} ./scripts/prepare-fork-branch.sh apply
+BASE_TAG=$MAIN_SHA SKIP_PATCHES='0002-* 0003-* 0004-*' \
+  WORKDIR=$PWD/mesa-fork-26.3.0-devel-$(date +%Y%m%d)-${MAIN_SHA:0:7} ./scripts/prepare-fork-branch.sh apply
 ```
 
 `main` is a **position, not a version**. Two builds a week apart both report `26.3.0-devel` and are
 different drivers — so a branch-tracked build puts a name in the ledger that cannot identify what
 ran, defeating stack attribution. Pin the sha and carry it in the artifact name
-(`…26.3.0-devel-e40d93a_gtk_0.x.so`). `SKIP_PATCHES='0002-*'` is required on main: upstream's
-`depth_cache_fraction` rework removed patch 0002's context; its `ccuhalf`/`ccuquarter` gears stay
-registered (patch 0001's `tu_etk_gears.h` registry) and are simply inert — falsified anyway.
+(`…26.3.0-devel-20260902-c0682c5_gtk_0.x.so` — date first so the DRIVER tab's lexical sort is
+chronological; `-e40d93a` is the one grandfathered sha-only name). `SKIP_PATCHES='0002-* 0003-* 0004-*'`
+is required on main: upstream's `depth_cache_fraction` rework removed patch 0002's context, and
+main @ `df96a4da` (2026-08-28) renamed `rp.gmem_disable_reason` to `force_render_mode_reason`,
+the field patches 0003/0004 write. All three gears (`ccuhalf`/`ccuquarter`, `dsbypass`, `dsany`)
+stay registered (patch 0001's `tu_etk_gears.h` registry) and are simply inert — dead gears anyway.
 
 > **Naming, because the community convention is misleading.** Android adrenotools packages (e.g.
 > `Turnip_v26.3.0-Rn`) are named after `main`'s in-progress VERSION string, so "v26.3.0" means
@@ -122,7 +126,7 @@ meson setup build-rocknix \
 Full build (reference container wrapper):
 
 ```bash
-docker exec turnip-rocknix bash -lc 'MESA_VER=26.2.1 /work/build_rocknix.sh'
+docker exec turnip-rocknix bash -lc 'MESA_VER=26.2.2 /work/build_rocknix.sh'
 ```
 
 For fleet builds, this wrapper is conducted by **`~/etk/forge.sh turnip`** (the ETK mother repo):

@@ -419,3 +419,29 @@ warm-relaunch before any A/B → **rule-7 re-baseline** (stock `syncdraw`, satur
 26.2.0 before ranking gears. `TURNIP_SO` / `CERTIFIED_BUILDS` move only after rig validation, at
 the next ETK release cut. Diary: 2026-08-19 bump stable to `26.2.1` and drop the 26.1.6 fallback;
 2026-10-14 `mesa-26.3.0-rc1` becomes the rc track.
+## Rebase 26.2.1 → 26.2.2, and the devel re-pin to main @ `c0682c54` (2026-09-02)
+
+Upstream released `mesa-26.2.2` on 2026-09-02 (91 commits over 26.2.1; 16 touch turnip/freedreno —
+XFB counter-offset scaling, FDM viewport/scissor and subsampled-image fixes, pipeline-library set-layout
+stitching, D32S8 sparse aspect masks, the `cs_lock_unlock_quirk` plumbing; **none in the
+sync/fence/tiler family**, and `tu6_emit_flushes()` is untouched). The stable track moves to
+`mesa-26.2.2`; the devel track re-pins to main @ `c0682c54` (2026-09-02, 76 `src/freedreno` commits
+since `d2e56df`).
+
+**Measured apply state (host gate, 2026-09-02):**
+
+| Base | Result |
+|---|---|
+| `mesa-26.2.2` (`3281a69a8b`) | **8/8, zero fuzz.** |
+| main @ `c0682c54` (26.3.0-devel) | **5/8 with `SKIP_PATCHES='0002-* 0003-* 0004-*'`.** |
+
+**New on main: patches 0003 (`dsbypass`) and 0004 (`dsany`) no longer apply.** Upstream
+`df96a4da` ("tu: Log autotune's overrides as reasons sysmem/gmem was forced", 2026-08-28) renamed
+`cmd->state.rp.gmem_disable_reason` to `force_render_mode_reason` across `tu_cmd_buffer.cc`. Both
+patches *write* that field, so this is not context drift a re-anchor could absorb — a fuzzed apply
+would fail at compile. Same disposition as 0002: both gears are **dead** (§Patch #3-A — unreachable
+for the fault), so they are dropped on a devel base rather than ported. `ccuhalf`/`ccuquarter`/
+`dsbypass`/`dsany` all stay registered in `tu_etk_gears.h` and are inert. The series stays
+base-agnostic (8/8 on every 26.2 tag); the rename will reach the fork's stable track only when a
+26.3 base is adopted, and that is the moment to decide whether 0003/0004 leave the series for good.
+

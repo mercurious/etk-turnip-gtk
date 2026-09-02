@@ -13,12 +13,14 @@
 #
 # Two kinds of patch live under ./patches/:
 #
-#   patches/*.patch              the fork series — base-agnostic. Measured 2026-08-21:
-#                                8/8 zero fuzz on mesa-26.2.1 (also 26.2.0/26.1.6 on
-#                                2026-08-07); 7/8 on main @ d2e56df (SKIP_PATCHES='0002-*'
-#                                — upstream refactored 0002's context away; still true at
-#                                this pin). Deliberately NOT duplicated per base; split it
-#                                only when it actually has to diverge.
+#   patches/*.patch              the fork series — base-agnostic. Measured 2026-09-02:
+#                                8/8 zero fuzz on mesa-26.2.2 (also 26.2.1 on 2026-08-21,
+#                                26.2.0/26.1.6 on 2026-08-07); 5/8 on main @ c0682c54
+#                                (SKIP_PATCHES='0002-* 0003-* 0004-*' — upstream refactored
+#                                0002's context away, and df96a4da renamed the
+#                                rp.gmem_disable_reason field 0003/0004 write; all three
+#                                are dead gears). Deliberately NOT duplicated per base;
+#                                split it only when it actually has to diverge.
 #   patches/backports/<line>/    upstream commits pulled back to an older base.
 #                                Base-specific by nature: 26.1/ carries two turnip
 #                                commits that 26.2 already contains natively, so
@@ -49,7 +51,7 @@ set -euo pipefail
 
 # ---- Config (override via environment) --------------------------------------
 UPSTREAM_URL="${UPSTREAM_URL:-https://gitlab.freedesktop.org/mesa/mesa.git}"
-BASE_TAG="${BASE_TAG:-mesa-26.2.1}"
+BASE_TAG="${BASE_TAG:-mesa-26.2.2}"
 WORKDIR_EXPLICIT="${WORKDIR:+1}"
 WORKDIR="${WORKDIR:-$(pwd)/mesa-fork-${BASE_TAG}}"
 PATCH_DIR="${PATCH_DIR:-$(cd "$(dirname "$0")/.." && pwd)/patches}"
@@ -117,11 +119,14 @@ Usage: $0 <build|apply>
           Stable:      $0 apply
           Fallback:    BASE_TAG=mesa-26.1.6 $0 apply
           Branch tip:  BASE_TAG=26.2 REUSE=1 $0 apply
-          Devel pin:   BASE_TAG=<40-hex-sha> SKIP_PATCHES='0002-*' $0 apply
+          Devel pin:   BASE_TAG=<40-hex-sha> SKIP_PATCHES='0002-* 0003-* 0004-*' \
+                         WORKDIR=\$PWD/mesa-fork-26.3.0-devel-<YYYYMMDD>-<sha7> $0 apply
                        (pin main by SHA, never by branch name — "main" is a
                         position, not a version, so a branch-tracked build
                         cannot be identified after the fact; 0002 no longer
-                        applies past upstream's depth_cache_fraction rework)
+                        applies past upstream's depth_cache_fraction rework,
+                        0003/0004 not past df96a4da's gmem_disable_reason ->
+                        force_render_mode_reason rename; date the tree name)
           RC track:    BASE_TAG=mesa-26.3.0-rc1 $0 apply
                        (when upstream cuts it — scheduled 2026-10-14)
 

@@ -14,35 +14,40 @@ checkout using the steps in [`BUILDING.md`](BUILDING.md).
 ## Lineage (downstream fork)
 
 > **Downstream fork of Mesa.**
-> Base: tag **`mesa-26.2.1`** (freedesktop GitLab — `gitlab.freedesktop.org/mesa/mesa`),
+> Base: tag **`mesa-26.2.2`** (freedesktop GitLab — `gitlab.freedesktop.org/mesa/mesa`),
 > rebased `mesa-26.1.3` → `mesa-26.1.6` (2026-07-30) → `mesa-26.2.0` (2026-08-07) →
-> `mesa-26.2.1` (2026-08-21).
+> `mesa-26.2.1` (2026-08-21) → `mesa-26.2.2` (2026-09-02).
 > Upstream is the canonical source; this is a downstream patch series carried on top of that tag.
 > Target backend: `freedreno` / `msm` (Linux KMS), glibc ABI — **not** the Android `bionic`/KGSL build.
 
 This is **not** a GitHub fork-network fork. Mesa's canonical home is freedesktop GitLab, not
 GitHub, so the GitHub "Fork" relationship is not available. This is a standalone repository that
 declares its lineage here and carries its changes as discrete commits over the base tag,
-so `git log mesa-26.2.1..` shows exactly the delta. See [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh).
+so `git log mesa-26.2.2..` shows exactly the delta. See [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh).
 
 The series is base-agnostic, so the same patches build every track the ETK Pitstop DRIVER tab
-holds side by side. Three tracks are offered (measured apply state on 2026-08-21):
+holds side by side. Three tracks are offered (measured apply state on 2026-09-02):
 
 ```bash
-# STABLE — mesa-26.2.1 (released 2026-08-20; 13 of its 19 fixes touch turnip/freedreno,
-# squarely the sync/fence/tiler family this fork tunes against): 8/8, zero fuzz
+# STABLE — mesa-26.2.2 (released 2026-09-02; 16 of its 91 commits touch turnip/freedreno:
+# XFB counter scaling, FDM viewport/scissor, pipeline-library set-layout stitching,
+# D32S8 sparse aspect masks — nothing in the sync/fence/tiler family this time): 8/8, zero fuzz
 ./scripts/prepare-fork-branch.sh apply
 
 # FALLBACK STABLE — mesa-26.1.6: 8/8, zero fuzz. The 26.1 series is EOL upstream,
 # so this track is frozen as-is.
 BASE_TAG=mesa-26.1.6 ./scripts/prepare-fork-branch.sh apply
 
-# PRE-RELEASE — 26.3.0-devel pinned by sha off upstream main: 7/8 (0002 skipped where
-# upstream's depth_cache_fraction rework removed its context; its gears stay registered
-# but inert). Pin by SHA, never by branch name — "main" is a position, not a version.
+# PRE-RELEASE — 26.3.0-devel pinned by sha off upstream main: 5/8. 0002 skipped since
+# upstream's depth_cache_fraction rework removed its context; 0003/0004 skipped since
+# main @ df96a4da (2026-08-28) renamed rp.gmem_disable_reason -> force_render_mode_reason,
+# the field dsbypass/dsany write. All three are dead gears (PATCHES.md): they stay
+# registered in tu_etk_gears.h and are inert. Pin by SHA, never by branch name — "main"
+# is a position, not a version — and carry the pin DATE in the tree name (the DRIVER
+# tab sorts lexically, so dated names list chronologically).
 MAIN_SHA=$(git ls-remote https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main | cut -f1)
-BASE_TAG=$MAIN_SHA SKIP_PATCHES='0002-*' \
-  WORKDIR=$PWD/mesa-fork-26.3.0-devel-${MAIN_SHA:0:7} ./scripts/prepare-fork-branch.sh apply
+BASE_TAG=$MAIN_SHA SKIP_PATCHES='0002-* 0003-* 0004-*' \
+  WORKDIR=$PWD/mesa-fork-26.3.0-devel-$(date +%Y%m%d)-${MAIN_SHA:0:7} ./scripts/prepare-fork-branch.sh apply
 ```
 
 When upstream cuts `mesa-26.3.0-rc1` (scheduled 2026-10-14) the rc track slots into the same

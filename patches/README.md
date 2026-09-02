@@ -8,7 +8,7 @@ required).
 
 | Path | What it is |
 |------|-----------|
-| `*.patch` | The **fork series** — base-agnostic. Measured 2026-08-21: applies **8/8 zero fuzz** to `mesa-26.2.1` (and to `mesa-26.2.0`/`mesa-26.1.6`, 2026-08-07), and **7/8** to main @ `d2e56df` with `SKIP_PATCHES='0002-*'` (0002's context was refactored away upstream — still true at this pin; its gears stay registered-but-inert). Deliberately *not* duplicated per base — split it only when it actually has to diverge. |
+| `*.patch` | The **fork series** — base-agnostic. Measured 2026-09-02: applies **8/8 zero fuzz** to `mesa-26.2.2` (and to `mesa-26.2.1` on 2026-08-21, `mesa-26.2.0`/`mesa-26.1.6` on 2026-08-07), and **5/8** to main @ `c0682c54` with `SKIP_PATCHES='0002-* 0003-* 0004-*'` (0002's context was refactored away upstream; 0003/0004 write `rp.gmem_disable_reason`, renamed on main @ `df96a4da` — all three are dead gears and stay registered-but-inert). Deliberately *not* duplicated per base — split it only when it actually has to diverge. |
 | `backports/<line>/` | **Upstream commits** pulled back to an older base. Base-specific by nature. |
 
 `backports/26.1/` carries two turnip commits that ship in 26.2 but were never backported to 26.1.x.
