@@ -14,24 +14,25 @@ checkout using the steps in [`BUILDING.md`](BUILDING.md).
 ## Lineage (downstream fork)
 
 > **Downstream fork of Mesa.**
-> Base: tag **`mesa-26.2.2`** (freedesktop GitLab — `gitlab.freedesktop.org/mesa/mesa`),
+> Base: tag **`mesa-26.2.3`** (freedesktop GitLab — `gitlab.freedesktop.org/mesa/mesa`),
 > rebased `mesa-26.1.3` → `mesa-26.1.6` (2026-07-30) → `mesa-26.2.0` (2026-08-07) →
-> `mesa-26.2.1` (2026-08-21) → `mesa-26.2.2` (2026-09-02).
+> `mesa-26.2.1` (2026-08-21) → `mesa-26.2.2` (2026-09-02) → `mesa-26.2.3` (2026-09-23).
 > Upstream is the canonical source; this is a downstream patch series carried on top of that tag.
 > Target backend: `freedreno` / `msm` (Linux KMS), glibc ABI — **not** the Android `bionic`/KGSL build.
 
 This is **not** a GitHub fork-network fork. Mesa's canonical home is freedesktop GitLab, not
 GitHub, so the GitHub "Fork" relationship is not available. This is a standalone repository that
 declares its lineage here and carries its changes as discrete commits over the base tag,
-so `git log mesa-26.2.2..` shows exactly the delta. See [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh).
+so `git log mesa-26.2.3..` shows exactly the delta. See [`scripts/prepare-fork-branch.sh`](scripts/prepare-fork-branch.sh).
 
 The series is base-agnostic, so the same patches build every track the ETK Pitstop DRIVER tab
-holds side by side. Three tracks are offered (measured apply state on 2026-09-02):
+holds side by side. Three tracks are offered (measured apply state on 2026-09-23):
 
 ```bash
-# STABLE — mesa-26.2.2 (released 2026-09-02; 16 of its 91 commits touch turnip/freedreno:
-# XFB counter scaling, FDM viewport/scissor, pipeline-library set-layout stitching,
-# D32S8 sparse aspect masks — nothing in the sync/fence/tiler family this time): 8/8, zero fuzz
+# STABLE — mesa-26.2.3 (released 2026-09-16; ~10 of its 85 commits touch turnip, three of
+# them query availability — atomic read of slot->available, CP-write flush after
+# CmdCopyQueryPoolResults, WAIT_MEM_WRITES before an XFB query posts — the sync family
+# patch 0006 lives in): 8/8, zero fuzz
 ./scripts/prepare-fork-branch.sh apply
 
 # FALLBACK STABLE — mesa-26.1.6: 8/8, zero fuzz. The 26.1 series is EOL upstream,

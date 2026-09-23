@@ -7,7 +7,7 @@
 # MUST be validated by actually loading on a COLD-booted rig (always-reboot doctrine).
 set -euo pipefail
 
-MESA_VER="${MESA_VER:-26.2.2}"   # stable-track default — keep in lockstep with prepare-fork-branch.sh BASE_TAG
+MESA_VER="${MESA_VER:-26.2.3}"   # stable-track default — keep in lockstep with prepare-fork-branch.sh BASE_TAG
 JOBS="${JOBS:-4}"
 WORK=/work
 cd "$WORK"

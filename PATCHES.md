@@ -445,3 +445,35 @@ for the fault), so they are dropped on a devel base rather than ported. `ccuhalf
 base-agnostic (8/8 on every 26.2 tag); the rename will reach the fork's stable track only when a
 26.3 base is adopted, and that is the moment to decide whether 0003/0004 leave the series for good.
 
+
+## Rebase 26.2.2 → 26.2.3; devel stays pinned at `c0682c54` (2026-09-23)
+
+Upstream released `mesa-26.2.3` on 2026-09-16 (85 commits over 26.2.2; ~10 touch turnip, the rest
+ir3/a4xx–a5xx freedreno, spirv/nir/glsl, wsi/wayland). **Three are in the query-availability path
+patch 0006 (KGSL-parity query-survive) lives in** — all Danylo Piliaiev, MR 44489, `Cc: mesa-stable`:
+
+- `38aadf54197` — `query_is_available(slot)` becomes `p_atomic_read(&slot->available)` (the
+  compiler could hoist the plain read out of the poll loop); the slot structs gain `alignas(8)`,
+  with `54a51faf8c1` fixing that PACKED+alignas pairing on older GCC.
+- `542da306f0b` — `emit_copy_query_pool_results` flushes as a CP write (TRANSFER_WRITE is not one).
+- `aa91556e1d0` — `CP_WAIT_MEM_WRITES` before an XFB query is marked available (stale results).
+
+**Semantic check, not just an apply check:** 0006 reads availability only through
+`query_is_available()` — none of its added lines touch `slot->available` directly — so it inherits the
+atomic read with no change, and neither of the other two overlaps its hunks. The stable track moves to
+`mesa-26.2.3`.
+
+**Measured apply state (host gate, 2026-09-23):**
+
+| Base | Result |
+|---|---|
+| `mesa-26.2.3` (`31e9a6b2e9`) | **8/8, zero fuzz** (`prepare-fork-branch.sh apply`). |
+| main @ `4e91c0ea` (26.3.0-devel) | **4/8** — 0002–0004 as at `c0682c54`, plus **0008**. |
+
+**New on main: 0008 (the `ETK-GTK` driverInfo mark) stops applying.** Context drift only: the
+`snprintf(p->driverInfo, …)` line it rewrites is byte-identical on main, but the trailing context
+`if (pdevice->info->chip >= 7) {` around `conformanceVersion` is gone (`82b868960e0` "Enable
+VK_KHR_multiview and Vulkan 1.3 on all a6xx devices", `6cf91c16869` "Bump conformanceVersion").
+Unlike 0003/0004 this is a **live** patch — a devel build without it cannot be attributed — so it gets
+re-contexted, never skipped. Not done now: the devel track stays pinned at `c0682c54` (where 0008
+applies) until the next re-pin, at the latest `mesa-26.3.0-rc1` (scheduled 2026-10-14).

@@ -13,8 +13,8 @@
 #
 # Two kinds of patch live under ./patches/:
 #
-#   patches/*.patch              the fork series — base-agnostic. Measured 2026-09-02:
-#                                8/8 zero fuzz on mesa-26.2.2 (also 26.2.1 on 2026-08-21,
+#   patches/*.patch              the fork series — base-agnostic. Measured 2026-09-23:
+#                                8/8 zero fuzz on mesa-26.2.3 (26.2.2 on 2026-09-02, 26.2.1 on 2026-08-21,
 #                                26.2.0/26.1.6 on 2026-08-07); 5/8 on main @ c0682c54
 #                                (SKIP_PATCHES='0002-* 0003-* 0004-*' — upstream refactored
 #                                0002's context away, and df96a4da renamed the
@@ -51,7 +51,7 @@ set -euo pipefail
 
 # ---- Config (override via environment) --------------------------------------
 UPSTREAM_URL="${UPSTREAM_URL:-https://gitlab.freedesktop.org/mesa/mesa.git}"
-BASE_TAG="${BASE_TAG:-mesa-26.2.2}"
+BASE_TAG="${BASE_TAG:-mesa-26.2.3}"
 WORKDIR_EXPLICIT="${WORKDIR:+1}"
 WORKDIR="${WORKDIR:-$(pwd)/mesa-fork-${BASE_TAG}}"
 PATCH_DIR="${PATCH_DIR:-$(cd "$(dirname "$0")/.." && pwd)/patches}"

@@ -150,5 +150,5 @@ docker exec "${CONTAINER}" bash -lc '
   printf "     %-18s %s\n" "ninja"   "\$(ninja --version)"
   printf "     %-18s %s\n" "python3" "\$(python3 --version)"
 '
-echo ">> Done. Build with:  docker exec ${CONTAINER} bash -lc 'MESA_VER=26.2.2 /work/build_android.sh'"
+echo ">> Done. Build with:  docker exec ${CONTAINER} bash -lc 'MESA_VER=26.2.3 /work/build_android.sh'"
 REMOTE
