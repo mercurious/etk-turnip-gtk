@@ -35,6 +35,7 @@ treats an absent/empty backport set as a no-op rather than an error.
 | `0006-KGSL-parity-query-survive-…` | Forge an available zero instead of device-lost, under the parity kernel. | Built; on-track validation pending |
 | `0007-zlatez-…` | Widen upstream's A650 `EARLY_Z_LATE_Z` hang workaround past its D32S8 format gate, plus a `dimlog` reachability probe. | **Built, not yet validated** — the open experiment |
 | `0008-Mark-the-fork-in-driverInfo-…` | `driverInfo` reports `Mesa <ver> (git-<sha>) ETK-GTK` so an A/B result is attributable to a build. | **Kept** |
+| `0009-ir3-ra-fix-the-forced-double-threadsize-…` | ir3 RA: fix the forced-wave128 (`IR3_DOUBLE_ONLY`) register cap — `*16` → `*8` per vec4; stops `0 max_waves` miscompiles on 64-vec4 a6xx (A650). Unconditional correctness fix. | **Kept** — rig-validated 2026-09-28 |
 
 The falsified patches are retained on purpose: they are `TU_DEBUG`-gated and default-off, and the
 production `.so` carries all gears so the negative results stay reproducible. The decision log is in

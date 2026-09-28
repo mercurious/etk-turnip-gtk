@@ -269,6 +269,36 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   the published series — it would have been lost on the first rebase. Carrying it as a patch fixes
   that.
 
+### Patch #9 — ir3 RA: forced-wave128 register cap (KEPT — correctness fix, not a gear)
+- **Files:** `src/freedreno/ir3/ir3_ra.c` (`patches/0009-…`). Unconditional; no `TU_DEBUG` gate —
+  it fixes a miscompile, it is not a tuning lever. Upstream-candidate as-is.
+- **The bug:** when an app requires a subgroup size of 128 with full subgroups, Turnip compiles
+  `IR3_DOUBLE_ONLY`, and `ir3_ra_get_reg_file_limits()` should cap full-register pressure so a
+  double-size wave-pair fits the register file. The cap is computed as `reg_size_vec4 / 2 * 16`,
+  but `limit_pressure.full` counts half-register slots (8 per vec4, `RA_FULL_SIZE = 4*48*2`). On
+  64-vec4 gens (A650 = `a6xx_gen3`) that is 512 > 384, so the cap never binds: RA hands out all
+  48 vec4, the shader reports **`0 max_waves, 1 double_threadsize`**, and computes garbage.
+  a7xx (96 vec4) is unaffected.
+- **How it surfaced:** llama.cpp's Vulkan backend (it forces 128 + full subgroups on its
+  `subgroupAdd` reduction shaders). `test-backend-ops` MUL_MAT f32 fails exactly at n=4..8 (the
+  multi-column mat-vec variants that cross 32 vec4); a 7-token prompt decodes to gibberish.
+  Reproduced on stock ROCKNIX 26.1.6 and every fork build 26.1.3 → 26.3.0-devel — **not caused by
+  any fork patch.**
+- **The change:** `reg_size_vec4 / 2 * 4 * 2` (the same vec4→slot conversion
+  `calc_limit_pressure_for_cs_with_barrier()` already uses). Over-budget shaders now spill.
+- **Validation (2026-09-28, upstream 26.2.3 ± this patch only, private-ICD A/B on the rig):**
+  mat-vec n=1..9 — stock FAILs n4–n8 on both runs, patched all OK on both runs; ir3 stats for the
+  failing pipelines — stock 0 waves / 48 regs, patched 2 waves / 32 regs + spills; greedy decode
+  on the GPU — stock gibberish, patched byte-identical to the CPU reference; 0 new GPU hangs.
+  Speed is unchanged (correctness fix only). Not yet raced under RPCS3 — normal cold-boot A/B
+  applies before it rides a shipped gen.
+- **Measured apply:** `mesa-26.2.3` **9/9, zero fuzz** (`prepare-fork-branch.sh apply`,
+  2026-09-28). The patched line is byte-identical on main @ `c0682c54`; the devel-track apply is
+  not yet measured.
+- **Falsified alongside it (do not re-propose):** lowering 8-bit SSBO loads to aligned 32-bit
+  loads on a6xx (ir3 emits `isam (u8)` there). It removed every 8-bit load and fixed nothing — the
+  k-quant test failures it targeted are a small-shape edge case unrelated to 8-bit access.
+
 ## The gear registry — and the bit collision it uncovered (2026-08-03)
 
 Every fork gear used to register itself inline, each patch editing `enum tu_debug_flags`
