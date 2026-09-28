@@ -270,6 +270,8 @@ plus gmem/`sddepth` variants used for the truncation-recovery and self-repair fl
   that.
 
 ### Patch #9 — ir3 RA: forced-wave128 register cap (KEPT — correctness fix, not a gear)
+- **Nickname:** "llamadreno" (the llama.cpp-on-Adreno campaign that found it). First minted as
+  `etk_turnip_rocknix_26.2.3_gtk_0.8.so`; it rides the normal gtk series from 0.8 on.
 - **Files:** `src/freedreno/ir3/ir3_ra.c` (`patches/0009-…`). Unconditional; no `TU_DEBUG` gate —
   it fixes a miscompile, it is not a tuning lever. Upstream-candidate as-is.
 - **The bug:** when an app requires a subgroup size of 128 with full subgroups, Turnip compiles
