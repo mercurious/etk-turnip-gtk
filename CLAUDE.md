@@ -28,3 +28,5 @@ the SM8250 rig. It publishes source and reproduces builds; it is not a distribut
 - Trunk-based: work on `main`, push same session; never force-push.
 - Public artifacts under the **mercurious** pseudonym; docs stay development/tuning-focused.
 - VALIDATION rule 7: re-baseline stock `syncdraw` after any base bump before ranking gears.
+
+@AGENTS.md
